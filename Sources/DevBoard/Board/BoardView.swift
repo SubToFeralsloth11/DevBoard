@@ -20,7 +20,7 @@ struct BoardView: View {
         }
         .padding(18)
         .frame(width: BoardMetrics.size.width, height: BoardMetrics.size.height)
-        .glassEffect(.regular.tint(.black.opacity(0.32)), in: .rect(cornerRadius: 34))
+        .glass(RoundedRectangle(cornerRadius: 34, style: .continuous), tint: .black.opacity(0.32))
         .shadow(color: .black.opacity(0.35), radius: 24, y: 12)
         .scaleEffect(model.boardShown ? 1 : 0.9, anchor: .top)
         .opacity(model.boardShown ? 1 : 0)

@@ -22,6 +22,54 @@ enum DB {
     }
 }
 
+private struct GlassFallbackKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// Forces the solid fallback instead of Liquid Glass (offscreen rendering).
+    var glassFallback: Bool {
+        get { self[GlassFallbackKey.self] }
+        set { self[GlassFallbackKey.self] = newValue }
+    }
+}
+
+/// Liquid Glass, or a solid frosted fill when Reduce Transparency is on.
+struct GlassSurface<S: Shape>: ViewModifier {
+    var shape: S
+    var tint: Color?
+    var interactive: Bool
+    @Environment(\.glassFallback) private var forced
+    @Environment(\.accessibilityReduceTransparency) private var reduce
+
+    func body(content: Content) -> some View {
+        if forced || reduce {
+            content
+                .background(shape.fill(Color(white: 0.13).opacity(0.94)))
+                .overlay(shape.stroke(.white.opacity(0.16), lineWidth: 1))
+        } else {
+            content.glassEffect(interactive ? .regular.tint(tint).interactive() : .regular.tint(tint), in: shape)
+        }
+    }
+}
+
+extension View {
+    func glass<S: Shape>(_ shape: S, tint: Color? = nil, interactive: Bool = false) -> some View {
+        modifier(GlassSurface(shape: shape, tint: tint, interactive: interactive))
+    }
+}
+
+/// `GlassEffectContainer` so neighbouring glass shapes morph together; plain stack in fallback mode.
+struct GlassContainer<Content: View>: View {
+    var spacing: CGFloat
+    @ViewBuilder var content: Content
+    @Environment(\.glassFallback) private var forced
+
+    var body: some View {
+        if forced { content } else { GlassEffectContainer(spacing: spacing) { content } }
+    }
+}
+
 /// Soft inner card used inside the glass board (glass on glass is avoided on purpose).
 struct CardBackground: ViewModifier {
     var radius: CGFloat = 20

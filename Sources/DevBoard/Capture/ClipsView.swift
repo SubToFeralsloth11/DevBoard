@@ -186,7 +186,7 @@ private struct ClipTile: View {
                         .font(.system(size: 18, weight: .bold))
                         .foregroundStyle(.white)
                         .frame(width: 44, height: 44)
-                        .glassEffect(.regular, in: .circle)
+                        .glass(Circle())
                         .opacity(hover ? 1 : 0)
                         .scaleEffect(hover ? 1 : 0.7)
                 }

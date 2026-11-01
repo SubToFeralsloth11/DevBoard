@@ -19,7 +19,7 @@ struct IslandView: View {
     }
 
     var body: some View {
-        GlassEffectContainer(spacing: 12) {
+        GlassContainer(spacing: 12) {
             VStack(spacing: 8) {
                 ZStack {
                     switch model.islandMode {
@@ -37,7 +37,7 @@ struct IslandView: View {
                     }
                 }
                 .frame(width: size.width, height: size.height)
-                .glassEffect(.regular.tint(.black.opacity(0.18)).interactive(), in: .capsule)
+                .glass(Capsule(), tint: .black.opacity(0.18), interactive: true)
                 .glassEffectID("island", in: ns)
                 .contextMenu { IslandMenu(model: model) }
 
@@ -46,7 +46,7 @@ struct IslandView: View {
                         .font(.system(size: 11.5, weight: .semibold, design: .rounded))
                         .padding(.horizontal, 12)
                         .frame(height: 26)
-                        .glassEffect(.regular.tint(.black.opacity(0.18)), in: .capsule)
+                        .glass(Capsule(), tint: .black.opacity(0.18))
                         .glassEffectID("label", in: ns)
                         .transition(.opacity)
                         .id(hovered)
@@ -57,6 +57,7 @@ struct IslandView: View {
         .padding(IslandMetrics.pad)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onChange(of: model.islandMode) { _, mode in if mode != .expanded { hovered = nil } }
+        .environment(\.colorScheme, .dark)
     }
 
     private func label(for b: IslandButton) -> String {

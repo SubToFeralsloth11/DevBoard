@@ -99,18 +99,20 @@ struct Sparkline: View {
     var maxValue: Double? = nil
 
     var body: some View {
+        // Newest sample sits at the right edge; history fills in leftwards.
+        let shift = SystemMonitor.historyLength - values.count
         Chart(Array(values.enumerated()), id: \.offset) { i, v in
-            AreaMark(x: .value("t", i), y: .value("v", v))
+            AreaMark(x: .value("t", i + shift), y: .value("v", v))
                 .interpolationMethod(.catmullRom)
                 .foregroundStyle(LinearGradient(colors: [color.opacity(0.45), color.opacity(0.0)], startPoint: .top, endPoint: .bottom))
-            LineMark(x: .value("t", i), y: .value("v", v))
+            LineMark(x: .value("t", i + shift), y: .value("v", v))
                 .interpolationMethod(.catmullRom)
                 .foregroundStyle(color)
                 .lineStyle(StrokeStyle(lineWidth: 1.6, lineCap: .round))
         }
         .chartXAxis(.hidden)
         .chartYAxis(.hidden)
-        .chartXScale(domain: 0...max(1, 89))
+        .chartXScale(domain: 0...(SystemMonitor.historyLength - 1))
         .chartYScale(domain: 0...(maxValue ?? max(values.max() ?? 1, 1)))
         .chartLegend(.hidden)
     }

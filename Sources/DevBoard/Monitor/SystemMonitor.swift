@@ -51,7 +51,7 @@ final class SystemMonitor {
     @ObservationIgnored private let sampler = Sampler()
     @ObservationIgnored private var loop: Task<Void, Never>?
     @ObservationIgnored private var sleeper: CheckedContinuation<Void, Never>?
-    private static let historyLength = 90
+    nonisolated static let historyLength = 90
 
     func start() {
         guard loop == nil else { return }
