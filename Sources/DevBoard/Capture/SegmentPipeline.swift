@@ -53,6 +53,7 @@ final class SegmentPipeline: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     private var keepSeconds: Double = 30
     private var retainFrom: CMTime?
     private var holds = 0
+    private var doomed: [Segment] = []     // reset while an export was reading them
     private var counter = 0
 
     /// Called (on `queue`) when a stream stops on its own; identifies which stream.
@@ -108,7 +109,10 @@ final class SegmentPipeline: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     func release() {
         queue.async {
             self.holds = max(0, self.holds - 1)
-            if self.holds == 0, self.resetPending { self.deleteFinished() }
+            if self.holds == 0 {
+                for s in self.doomed { try? FileManager.default.removeItem(at: s.url) }
+                self.doomed.removeAll()
+            }
             self.prune()
         }
     }
@@ -124,14 +128,13 @@ final class SegmentPipeline: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             self.current = nil
             self.previous = nil
             self.stopIdleTimer()
-            if self.holds > 0 { self.resetPending = true } else { self.deleteFinished() }
+            if self.holds > 0 {
+                self.doomed += self.finished
+            } else {
+                for s in self.finished { try? FileManager.default.removeItem(at: s.url) }
+            }
+            self.finished.removeAll()
         }
-    }
-
-    private func deleteFinished() {
-        resetPending = false
-        for s in finished { try? FileManager.default.removeItem(at: s.url) }
-        finished.removeAll()
     }
 
     // MARK: SCStreamOutput
