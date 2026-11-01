@@ -105,9 +105,16 @@ final class SegmentPipeline: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         }
     }
 
-    func release() { queue.async { self.holds = max(0, self.holds - 1); self.prune() } }
+    func release() {
+        queue.async {
+            self.holds = max(0, self.holds - 1)
+            if self.holds == 0, self.resetPending { self.deleteFinished() }
+            self.prune()
+        }
+    }
 
-    /// Stops writing and deletes everything (stream stopped for good).
+    /// Stops writing and deletes everything (stream stopped for good). Files an export is
+    /// still reading are deleted once it calls `release()`.
     func reset() {
         queue.async {
             for w in [self.current, self.previous?.writer].compactMap({ $0 }) {
@@ -117,9 +124,14 @@ final class SegmentPipeline: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             self.current = nil
             self.previous = nil
             self.stopIdleTimer()
-            for s in self.finished { try? FileManager.default.removeItem(at: s.url) }
-            self.finished.removeAll()
+            if self.holds > 0 { self.resetPending = true } else { self.deleteFinished() }
         }
+    }
+
+    private func deleteFinished() {
+        resetPending = false
+        for s in finished { try? FileManager.default.removeItem(at: s.url) }
+        finished.removeAll()
     }
 
     // MARK: SCStreamOutput
