@@ -69,7 +69,10 @@ final class AppModel {
     }
     /// Drives the board's in/out animation; the controller orders the window.
     var boardShown = false {
-        didSet { monitor.detailed = boardShown && boardTab == .monitor }
+        didSet {
+            monitor.detailed = boardShown && boardTab == .monitor
+            if boardShown != oldValue { refreshIslandMode() }
+        }
     }
     var boardPinned = false
     var islandMode: IslandMode = .compact
@@ -100,12 +103,19 @@ final class AppModel {
         refreshIslandMode()
     }
 
+    /// Toasts stay up while the pointer rests on them so their action stays clickable.
     func showToast(_ toast: Toast, seconds: Double = 3.2) {
         self.toast = toast
         refreshIslandMode()
         toastTask?.cancel()
         toastTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(seconds))
+            var held = false
+            while !Task.isCancelled, self?.hovering == true {
+                held = true
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+            if held { try? await Task.sleep(for: .seconds(1.2)) }
             guard !Task.isCancelled, let self else { return }
             self.toast = nil
             self.refreshIslandMode()
@@ -118,8 +128,9 @@ final class AppModel {
         refreshIslandMode()
     }
 
+    /// Toast beats hover; hover never expands the island while the board hangs below it.
     private func refreshIslandMode() {
-        let next: IslandMode = hovering ? .expanded : (toast != nil ? .toast : .compact)
+        let next: IslandMode = toast != nil ? .toast : (hovering && !boardShown ? .expanded : .compact)
         guard next != islandMode else { return }
         island?.willChange(to: next)
         withAnimation(DB.spring) { islandMode = next }

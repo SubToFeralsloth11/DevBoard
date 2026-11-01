@@ -120,6 +120,7 @@ struct ClipEditor: View {
         }
         .onChange(of: look) { _, new in scheduleLook(new) }
         .onChange(of: muted) { _, m in player.isMuted = m }
+        .onChange(of: model.boardShown) { _, shown in if !shown { player.pause() } }
     }
 
     private var filterStrip: some View {

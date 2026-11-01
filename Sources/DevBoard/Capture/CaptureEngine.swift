@@ -24,6 +24,8 @@ final class CaptureEngine {
     @ObservationIgnored private var recordingHostStart: CMTime?
     @ObservationIgnored private var restartTask: Task<Void, Never>?
     @ObservationIgnored private var activeKey: StreamKey?
+    @ObservationIgnored private var syncChain: Task<Void, Never>?
+    @ObservationIgnored private var permissionTask: Task<Void, Never>?
 
     /// Settings that require restarting the stream when they change.
     private struct StreamKey: Equatable {
@@ -37,8 +39,8 @@ final class CaptureEngine {
 
     init(model: AppModel) {
         self.model = model
-        pipeline.onStop = { [weak self] error in
-            Task { @MainActor in self?.streamStopped(error) }
+        pipeline.onStop = { [weak self] source, error in
+            Task { @MainActor in self?.streamStopped(source, error) }
         }
     }
 
@@ -47,14 +49,24 @@ final class CaptureEngine {
 
     // MARK: Stream lifecycle
 
-    /// Starts, restarts or stops the stream to match settings. Safe to call often.
-    func syncStream() async {
+    /// Starts, restarts or stops the stream to match settings. Calls are serialised, so
+    /// overlapping requests (settings toggles, wake, record) never start two streams.
+    func syncStream(forceOff: Bool = false) async {
+        let previous = syncChain
+        let task = Task { @MainActor [weak self] in
+            await previous?.value
+            await self?.syncNow(forceOff: forceOff)
+        }
+        syncChain = task
+        await task.value
+    }
+
+    private func syncNow(forceOff: Bool) async {
         pipeline.setKeepSeconds(Double(settings.replaySeconds))
-        if !needsStream {
+        if forceOff || !needsStream {
             await stopStream()
             return
         }
-        if streamState == .starting { return }
         if stream != nil, activeKey == wantedKey { return }
         await stopStream(keepFiles: true)
         await startStream()
@@ -104,6 +116,8 @@ final class CaptureEngine {
             activeKey = wantedKey
             streamState = .running
             streamStartedAt = .now
+            permissionTask?.cancel()
+            permissionTask = nil
         } catch {
             stream = nil
             activeKey = nil
@@ -115,7 +129,7 @@ final class CaptureEngine {
     private func stopStream(keepFiles: Bool = false) async {
         restartTask?.cancel()
         guard let s = stream else {
-            if streamState != .off, streamState != .starting { streamState = .off }
+            if streamState != .off { streamState = .off }
             return
         }
         stream = nil
@@ -126,11 +140,23 @@ final class CaptureEngine {
         streamStartedAt = nil
     }
 
-    private func streamStopped(_ error: Error?) {
+    private func streamStopped(_ source: ObjectIdentifier, _ error: Error?) {
+        // Ignore late callbacks from a stream we already replaced or stopped.
+        guard let s = stream, ObjectIdentifier(s) == source else { return }
         stream = nil
         activeKey = nil
-        streamState = .failed(error?.localizedDescription ?? "Stream stopped")
         streamStartedAt = nil
+        let ns = error as NSError?
+        if ns?.domain == SCStreamErrorDomain, ns?.code == SCStreamError.userStopped.rawValue {
+            // Stopped from the system's menu-bar capture control: respect it.
+            streamState = .off
+            settings.replayEnabled = false
+            Task { if isRecording { await stopRecording() } }
+            model.showToast(Toast(symbol: "pause.circle", title: "Capture stopped", subtitle: "Instant replay is off until you turn it back on",
+                                  tint: .secondary, action: .openSettings))
+            return
+        }
+        streamState = .failed(ns?.localizedDescription ?? "Stream stopped")
         // Display sleep, resolution change, etc. Try again shortly while still wanted.
         restartTask?.cancel()
         restartTask = Task { [weak self] in
@@ -142,7 +168,7 @@ final class CaptureEngine {
 
     func shutdown() async {
         if isRecording { await stopRecording() }
-        await stopStream()
+        await syncStream(forceOff: true)
     }
 
     private func reportPermissionOrError(_ error: Error) {
@@ -150,11 +176,28 @@ final class CaptureEngine {
         let declined = ns.domain == SCStreamErrorDomain && ns.code == SCStreamError.userDeclined.rawValue
         if declined || !CGPreflightScreenCaptureAccess() {
             model.showToast(Toast(symbol: "lock.shield", title: "Screen Recording permission needed",
-                                  subtitle: "Click to open Privacy settings, enable DevBoard, then relaunch",
+                                  subtitle: "Click to open Privacy settings and enable DevBoard",
                                   tint: DB.amber, action: .openPrivacySettings), seconds: 6)
+            waitForPermission()
         } else {
             model.showToast(Toast(symbol: "exclamationmark.triangle.fill", title: "Capture failed",
                                   subtitle: ns.localizedDescription, tint: DB.rec), seconds: 5)
+        }
+    }
+
+    /// Cheap 3 s poll; starts capture as soon as the permission is granted.
+    private func waitForPermission() {
+        guard permissionTask == nil else { return }
+        permissionTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(3))
+                guard let self else { return }
+                if CGPreflightScreenCaptureAccess() {
+                    self.permissionTask = nil
+                    if self.needsStream { await self.syncStream() }
+                    return
+                }
+            }
         }
     }
 
@@ -185,16 +228,28 @@ final class CaptureEngine {
         let url = model.library.newURL(prefix: "Recording", ext: "mp4")
         await exportClip(from: start, to: url, title: "Recording saved")
         pipeline.retain(from: nil)
-        if !settings.replayEnabled { await stopStream() }
+        if !settings.replayEnabled { await syncStream() }
     }
 
     // MARK: Replay
 
     func saveReplay() async {
-        guard replayArmed else {
+        if !settings.replayEnabled {
             model.showToast(Toast(symbol: "memories", title: "Instant replay is off",
-                                  subtitle: "Turn it on in Settings or with the island's replay button", tint: DB.amber,
+                                  subtitle: "Turn it on in Settings or right-click the replay button", tint: DB.amber,
                                   action: .openSettings))
+            return
+        }
+        if streamState != .running { await syncStream() }
+        guard replayArmed, let started = streamStartedAt else {
+            if case .failed(let reason) = streamState {
+                model.showToast(Toast(symbol: "exclamationmark.triangle.fill", title: "Replay unavailable", subtitle: reason,
+                                      tint: DB.amber, action: .openPrivacySettings), seconds: 5)
+            }
+            return
+        }
+        if Date().timeIntervalSince(started) < 1 {
+            model.showToast(Toast(symbol: "hourglass", title: "Replay just started", subtitle: "Nothing buffered yet — try again in a moment", tint: DB.amber))
             return
         }
         let seconds = Double(settings.replaySeconds)

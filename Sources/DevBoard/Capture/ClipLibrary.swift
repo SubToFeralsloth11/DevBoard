@@ -118,13 +118,27 @@ final class ClipLibrary {
 
     var totalSize: Int64 { items.reduce(0) { $0 + $1.size } }
 
+    /// File URL plus, for images, the raw bytes (no decoded copy is made).
     static func copyToPasteboard(_ url: URL) {
         let pb = NSPasteboard.general
         pb.clearContents()
-        if let type = UTType(filenameExtension: url.pathExtension), type.conforms(to: .image), let img = NSImage(contentsOf: url) {
-            pb.writeObjects([url as NSURL, img])
-        } else {
-            pb.writeObjects([url as NSURL])
+        let item = NSPasteboardItem()
+        item.setString(url.absoluteString, forType: .fileURL)
+        if let type = UTType(filenameExtension: url.pathExtension), type.conforms(to: .image),
+           let data = try? Data(contentsOf: url, options: .mappedIfSafe) {
+            item.setData(data, forType: NSPasteboard.PasteboardType(type.identifier))
         }
+        pb.writeObjects([item])
+    }
+
+    /// Decodes an image no larger than `maxPixel` on its long edge.
+    nonisolated static func downsampled(_ url: URL, maxPixel: Int) -> NSImage? {
+        guard let src = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, [
+                  kCGImageSourceCreateThumbnailFromImageAlways: true,
+                  kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+                  kCGImageSourceCreateThumbnailWithTransform: true,
+              ] as CFDictionary) else { return nil }
+        return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
     }
 }

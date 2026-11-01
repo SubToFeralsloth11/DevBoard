@@ -68,7 +68,9 @@ struct IslandView: View {
         case .clips: return "Clips & screenshots  ⌥⇧C"
         case .screenshot: return "Screenshot  ⌥⇧S  ·  right-click for more"
         case .record: return model.capture.isRecording ? "Stop recording  ⌥⇧R" : "Record screen  ⌥⇧R"
-        case .replay: return model.capture.replayArmed ? "Save last \(s.replaySeconds)s  ⌥⇧X  ·  right-click to turn off" : "Instant replay is off  ·  click to turn on"
+        case .replay:
+            if model.capture.replayArmed { return "Save last \(s.replaySeconds)s  ⌥⇧X  ·  right-click to turn off" }
+            return s.replayEnabled ? "Instant replay isn't running  ·  click to retry" : "Instant replay is off  ·  click to turn on"
         case .settings: return "Settings"
         }
     }
@@ -179,7 +181,7 @@ private struct ExpandedContent: View {
             button(.record, model.capture.isRecording ? "stop.fill" : "record.circle",
                    tint: DB.rec, active: model.capture.isRecording) { model.perform(.toggleRecording) }
             button(.replay, "memories", tint: DB.amber, active: model.capture.replayArmed, dimmed: !model.capture.replayArmed) {
-                model.perform(model.capture.replayArmed ? .saveReplay : .toggleReplay)
+                model.perform(model.settings.replayEnabled ? .saveReplay : .toggleReplay)
             }
             .contextMenu {
                 Button(model.settings.replayEnabled ? "Turn instant replay off" : "Turn instant replay on") { model.perform(.toggleReplay) }

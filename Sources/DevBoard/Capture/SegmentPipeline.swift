@@ -25,6 +25,11 @@ final class SegmentPipeline: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     let queue = DispatchQueue(label: "devboard.capture", qos: .userInitiated)
     private let dir: URL
     private let segmentLength = CMTime(seconds: 5, preferredTimescale: 600)
+    /// How long a rotated-out segment keeps accepting late audio before it is closed.
+    private let audioGrace: TimeInterval = 0.4
+    /// With a static screen SCK sends no new frames; repeat the last one this often so
+    /// segments keep rotating and audio keeps interleaving.
+    private let idleRepeat = CMTime(seconds: 0.5, preferredTimescale: 600)
 
     private struct Writer {
         let url: URL
@@ -38,6 +43,9 @@ final class SegmentPipeline: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
 
     private var settings: EncoderSettings?
     private var current: Writer?
+    private var previous: (writer: Writer, end: CMTime)?   // rotated out, still taking late audio
+    private var lastImage: CVImageBuffer?
+    private var lastFormat: CMVideoFormatDescription?
     private var finished: [Segment] = []
     private var pendingFinishes = 0
     private var waiters: [([Segment]) -> Void] = []
@@ -46,7 +54,8 @@ final class SegmentPipeline: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     private var holds = 0
     private var counter = 0
 
-    var onStop: ((Error?) -> Void)?
+    /// Called (on `queue`) when a stream stops on its own; identifies which stream.
+    var onStop: ((ObjectIdentifier, Error?) -> Void)?
 
     override init() {
         dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
@@ -62,10 +71,7 @@ final class SegmentPipeline: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
 
     func configure(_ s: EncoderSettings, keepSeconds: Double) {
         queue.async {
-            if s != self.settings, let cur = self.current {
-                self.finish(cur, at: max(Self.hostNow, cur.last))
-                self.current = nil
-            }
+            if s != self.settings { self.closeAll() }
             self.settings = s
             self.keepSeconds = keepSeconds
         }
@@ -73,7 +79,7 @@ final class SegmentPipeline: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
 
     func setKeepSeconds(_ v: Double) { queue.async { self.keepSeconds = v; self.prune() } }
 
-    /// Starts protecting segments from pruning (manual recording).
+    /// Protects segments from pruning from `t` on (manual recording); nil clears it.
     func retain(from t: CMTime?) { queue.async { self.retainFrom = t; self.prune() } }
 
     /// Closes the open segment and hands back every finished segment once all writers are done.
@@ -81,10 +87,7 @@ final class SegmentPipeline: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     func flush(_ done: @escaping ([Segment]) -> Void) {
         queue.async {
             self.holds += 1
-            if let cur = self.current {
-                self.finish(cur, at: max(Self.hostNow, cur.last))
-                self.current = nil
-            }
+            self.closeAll()
             self.waiters.append(done)
             self.drainWaiters()
         }
@@ -92,14 +95,16 @@ final class SegmentPipeline: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
 
     func release() { queue.async { self.holds = max(0, self.holds - 1); self.prune() } }
 
-    /// Stops writing and deletes everything (stream stopped).
+    /// Stops writing and deletes everything (stream stopped for good).
     func reset() {
         queue.async {
-            if let cur = self.current {
-                cur.writer.cancelWriting()
-                try? FileManager.default.removeItem(at: cur.url)
-                self.current = nil
+            for w in [self.current, self.previous?.writer].compactMap({ $0 }) {
+                w.writer.cancelWriting()
+                try? FileManager.default.removeItem(at: w.url)
             }
+            self.current = nil
+            self.previous = nil
+            self.lastImage = nil
             for s in self.finished { try? FileManager.default.removeItem(at: s.url) }
             self.finished.removeAll()
         }
@@ -118,13 +123,12 @@ final class SegmentPipeline: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
+        let id = ObjectIdentifier(stream)
         queue.async {
-            if let cur = self.current {
-                self.finish(cur, at: cur.last)
-                self.current = nil
-            }
+            self.closeAll()
+            self.lastImage = nil
         }
-        onStop?(error)
+        onStop?(id, error)
     }
 
     // MARK: Writing (queue)
@@ -132,30 +136,81 @@ final class SegmentPipeline: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     private func handleVideo(_ sb: CMSampleBuffer) {
         guard let attachments = CMSampleBufferGetSampleAttachmentsArray(sb, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
               let raw = attachments.first?[.status] as? Int,
-              SCFrameStatus(rawValue: raw) == .complete,
+              let status = SCFrameStatus(rawValue: raw),
               let settings else { return }
         let pts = sb.presentationTimeStamp
+        switch status {
+        case .complete:
+            lastImage = sb.imageBuffer
+            lastFormat = sb.formatDescription
+            append(sb, at: pts, settings: settings)
+        case .idle:
+            // Nothing changed on screen: re-append the last frame at a low rate.
+            guard let image = lastImage, let format = lastFormat,
+                  let cur = current, CMTimeSubtract(pts, cur.last) >= idleRepeat else { return }
+            var timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: pts, decodeTimeStamp: .invalid)
+            var copy: CMSampleBuffer?
+            CMSampleBufferCreateReadyWithImageBuffer(allocator: nil, imageBuffer: image, formatDescription: format,
+                                                     sampleTiming: &timing, sampleBufferOut: &copy)
+            if let copy { append(copy, at: pts, settings: settings) }
+        default:
+            break
+        }
+    }
+
+    private func append(_ sb: CMSampleBuffer, at pts: CMTime, settings: EncoderSettings) {
         if let cur = current, CMTimeSubtract(pts, cur.start) >= segmentLength {
-            finish(cur, at: pts)
-            current = nil
+            rotate(at: pts)
         }
         if current == nil {
             current = makeWriter(at: pts, settings: settings)
         }
-        guard var cur = current, pts >= cur.last else { return }
+        guard var cur = current, pts > cur.last || pts == cur.start else { return }
         if cur.video.isReadyForMoreMediaData, cur.video.append(sb) {
             cur.last = pts
             current = cur
         } else if cur.writer.status == .failed {
             cur.writer.cancelWriting()
+            try? FileManager.default.removeItem(at: cur.url)
             current = nil
         }
     }
 
+    /// The outgoing writer stays open briefly so audio that straddles or trails the cut still lands in it.
+    private func rotate(at pts: CMTime) {
+        if let p = previous { finish(p.writer, at: p.end) }
+        previous = nil
+        guard let cur = current else { return }
+        current = nil
+        if cur.audio == nil, cur.mic == nil {
+            finish(cur, at: pts)
+            return
+        }
+        previous = (cur, pts)
+        let url = cur.url
+        queue.asyncAfter(deadline: .now() + audioGrace) { [self] in
+            guard let p = previous, p.writer.url == url else { return }
+            previous = nil
+            finish(p.writer, at: p.end)
+        }
+    }
+
+    private func closeAll() {
+        if let p = previous { finish(p.writer, at: p.end) }
+        previous = nil
+        if let cur = current { finish(cur, at: max(Self.hostNow, cur.last)) }
+        current = nil
+    }
+
     private func handleAudio(_ sb: CMSampleBuffer, mic: Bool) {
-        guard let cur = current, let input = mic ? cur.mic : cur.audio else { return }
-        guard sb.presentationTimeStamp >= cur.start, input.isReadyForMoreMediaData else { return }
-        input.append(sb)
+        let start = sb.presentationTimeStamp
+        let end = CMTimeAdd(start, sb.duration.isValid ? sb.duration : .zero)
+        if let p = previous, start < p.end, let input = mic ? p.writer.mic : p.writer.audio, input.isReadyForMoreMediaData {
+            input.append(sb)
+        }
+        if let cur = current, end > cur.start, let input = mic ? cur.mic : cur.audio, input.isReadyForMoreMediaData {
+            input.append(sb)   // the writer trims anything before the session start
+        }
     }
 
     private func makeWriter(at pts: CMTime, settings s: EncoderSettings) -> Writer? {
@@ -204,12 +259,13 @@ final class SegmentPipeline: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             try? FileManager.default.removeItem(at: w.url)
             return
         }
-        w.writer.endSession(atSourceTime: max(end, w.last))
+        let stop = max(end, w.last)
+        w.writer.endSession(atSourceTime: stop)
         w.video.markAsFinished()
         w.audio?.markAsFinished()
         w.mic?.markAsFinished()
         pendingFinishes += 1
-        let seg = Segment(url: w.url, start: w.start, end: max(end, w.last))
+        let seg = Segment(url: w.url, start: w.start, end: stop)
         w.writer.finishWriting { [self] in
             queue.async {
                 self.pendingFinishes -= 1
@@ -232,7 +288,7 @@ final class SegmentPipeline: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         for done in w { done(snapshot) }
     }
 
-    /// Drops segments older than the replay window unless a recording still needs them.
+    /// Drops segments older than the replay window unless a recording or an export still needs them.
     private func prune() {
         guard holds == 0 else { return }
         let cutoff = CMTimeSubtract(Self.hostNow, CMTime(seconds: keepSeconds + 6, preferredTimescale: 600))

@@ -175,12 +175,18 @@ private final class TranscriptWorker: @unchecked Sendable {
             var changed: [AgentSnapshot] = []
             var removed: [String] = []
             let now = Date()
+            // A parent waiting on its subagents is still busy: count their activity as its own.
+            var childLatest: [String: Date] = [:]
+            for st in states.values {
+                if let p = st.snap.parentID { childLatest[p] = max(childLatest[p] ?? .distantPast, st.snap.lastEvent) }
+            }
             for (path, st) in states {
                 var s = st.snap
+                let active = max(s.lastEvent, childLatest[path] ?? .distantPast)
                 s.live = live.contains(path) || (s.parentID.map { live.contains($0) && s.status.isWorking } ?? false)
-                if s.status.isWorking, now.timeIntervalSince(s.lastEvent) > 600 { s.status = .idle }
+                if s.status.isWorking, now.timeIntervalSince(active) > 600 { s.status = .idle }
                 s.recentEvents.removeAll { now.timeIntervalSince($0) > 600 }
-                if !s.live, now.timeIntervalSince(s.lastEvent) > window {
+                if !s.live, now.timeIntervalSince(active) > window {
                     states[path] = nil
                     removed.append(path)
                     continue
@@ -234,10 +240,15 @@ private final class TranscriptWorker: @unchecked Sendable {
 
     private func changed(_ paths: [String]) {
         var snaps: [String: AgentSnapshot] = [:]
+        var removed: [String] = []
         for p in Set(paths) where p.hasSuffix(".jsonl") {
-            if let s = ingest(p) { snaps[s.id] = s }
+            if let s = ingest(p) {
+                snaps[s.id] = s
+            } else if states[p] == nil, !FileManager.default.fileExists(atPath: p) {
+                removed.append(p)
+            }
         }
-        if !snaps.isEmpty { onUpdate?(Array(snaps.values), [], false) }
+        if !snaps.isEmpty || !removed.isEmpty { onUpdate?(Array(snaps.values), removed, false) }
     }
 
     // MARK: Reading
@@ -261,7 +272,7 @@ private final class TranscriptWorker: @unchecked Sendable {
                 st.snap.name = ((path as NSString).lastPathComponent as NSString).deletingPathExtension
             }
             if size > Self.fullReadLimit {
-                readHead(path, into: st)
+                readHead(path, into: st, includeSession: true)
                 st.offset = size - Self.tailRead
                 st.snap.partial = true
                 st.remainder = Data([0])   // marker: drop the first (cut) line
@@ -293,14 +304,22 @@ private final class TranscriptWorker: @unchecked Sendable {
         return st.snap
     }
 
-    private func readHead(_ path: String, into st: SessionState) {
+    /// Line 1 is the title (rewritten in place). For tail-only reads, line 2 (`session`) carries cwd and parent.
+    private func readHead(_ path: String, into st: SessionState, includeSession: Bool = false) {
         guard let h = FileHandle(forReadingAtPath: path) else { return }
         defer { try? h.close() }
-        guard let data = try? h.read(upToCount: 4096),
-              let nl = data.firstIndex(of: UInt8(ascii: "\n")),
-              let obj = (try? JSONSerialization.jsonObject(with: data[..<nl])) as? [String: Any],
-              obj["type"] as? String == "title", let t = obj["title"] as? String, !t.isEmpty else { return }
-        st.snap.title = Self.clean(t)
+        guard let data = try? h.read(upToCount: 16_384) else { return }
+        for line in data.split(separator: UInt8(ascii: "\n")).prefix(4) {
+            guard let obj = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any] else { continue }
+            switch obj["type"] as? String {
+            case "title":
+                if let t = obj["title"] as? String, !t.isEmpty { st.snap.title = Self.clean(t) }
+            case "session" where includeSession:
+                apply(obj, to: st)
+            default:
+                break
+            }
+        }
     }
 
     // MARK: Parsing

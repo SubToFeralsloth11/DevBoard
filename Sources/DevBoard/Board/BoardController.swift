@@ -72,7 +72,7 @@ final class BoardController: NSObject, NSWindowDelegate {
     }
 
     private func position() {
-        let screen = model.island?.screen ?? NSScreen.screens.first ?? NSScreen.main!
+        guard let screen = model.island?.screen ?? NSScreen.screens.first else { return }
         let top = (model.island?.barBottomY ?? screen.visibleFrame.maxY) - 10 + BoardMetrics.shadowPad
         let f = panel.frame
         let x = screen.frame.midX - f.width / 2

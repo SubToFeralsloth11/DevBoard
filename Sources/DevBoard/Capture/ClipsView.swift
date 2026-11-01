@@ -284,7 +284,7 @@ private struct ImageViewer: View {
         }
         .task(id: item.url) {
             let url = item.url
-            let loaded = await Task.detached { NSImage(contentsOf: url) }.value
+            let loaded = await Task.detached { ClipLibrary.downsampled(url, maxPixel: 2200) }.value
             withAnimation(DB.soft) { image = loaded }
         }
     }

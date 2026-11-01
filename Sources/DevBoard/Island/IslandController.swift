@@ -87,7 +87,8 @@ final class IslandController {
 
     /// Bottom edge of the island bar in screen coordinates; the board hangs below this.
     var barBottomY: CGFloat { panel.frame.maxY - IslandMetrics.pad - IslandMetrics.compact.height }
-    var screen: NSScreen { NSScreen.screens.first ?? NSScreen.main! }
+    /// The menu-bar screen; nil only mid display reconfiguration.
+    var screen: NSScreen? { NSScreen.screens.first }
 
     private func hover(_ inside: Bool) {
         hoverWork?.cancel()
@@ -122,8 +123,8 @@ final class IslandController {
 
     private func layout(content: CGSize) {
         currentContent = content
-        let s = screen
-        let menuBarBottom = s.visibleFrame.maxY == s.frame.maxY ? s.frame.maxY : s.visibleFrame.maxY
+        guard let s = screen else { return }
+        let menuBarBottom = s.visibleFrame.maxY
         let size = CGSize(width: content.width + IslandMetrics.pad * 2, height: content.height + IslandMetrics.pad * 2)
         let top = menuBarBottom - IslandMetrics.topGap + IslandMetrics.pad
         let frame = NSRect(x: s.frame.midX - size.width / 2, y: top - size.height, width: size.width, height: size.height)
