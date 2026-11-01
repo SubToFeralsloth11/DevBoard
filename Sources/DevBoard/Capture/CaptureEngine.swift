@@ -94,7 +94,7 @@ final class CaptureEngine {
             cfg.height = h
             cfg.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(settings.fps))
             cfg.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange   // half the memory of BGRA
-            cfg.queueDepth = 4                                                    // keep the surface pool small
+            cfg.queueDepth = 5                                                    // small pool; one surface is held for idle repeats
             cfg.showsCursor = settings.showCursor
             cfg.colorSpaceName = CGColorSpace.sRGB
             cfg.capturesAudio = settings.systemAudio
@@ -129,13 +129,14 @@ final class CaptureEngine {
     private func stopStream(keepFiles: Bool = false) async {
         restartTask?.cancel()
         guard let s = stream else {
+            if !keepFiles { pipeline.reset() }   // e.g. after a stream error: drop leftover footage
             if streamState != .off { streamState = .off }
             return
         }
         stream = nil
         activeKey = nil
         try? await s.stopCapture()
-        if !keepFiles { pipeline.reset() }
+        if keepFiles { pipeline.streamEnded() } else { pipeline.reset() }
         streamState = .off
         streamStartedAt = nil
     }
@@ -176,7 +177,7 @@ final class CaptureEngine {
         let declined = ns.domain == SCStreamErrorDomain && ns.code == SCStreamError.userDeclined.rawValue
         if declined || !CGPreflightScreenCaptureAccess() {
             model.showToast(Toast(symbol: "lock.shield", title: "Screen Recording permission needed",
-                                  subtitle: "Click to open Privacy settings and enable DevBoard",
+                                  subtitle: "Enable DevBoard in Privacy settings, then relaunch if it doesn't start",
                                   tint: DB.amber, action: .openPrivacySettings), seconds: 6)
             waitForPermission()
         } else {

@@ -46,6 +46,7 @@ final class SegmentPipeline: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     private var previous: (writer: Writer, end: CMTime)?   // rotated out, still taking late audio
     private var lastImage: CVImageBuffer?
     private var lastFormat: CMVideoFormatDescription?
+    private var idleTimer: DispatchSourceTimer?
     private var finished: [Segment] = []
     private var pendingFinishes = 0
     private var waiters: [([Segment]) -> Void] = []
@@ -71,9 +72,20 @@ final class SegmentPipeline: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
 
     func configure(_ s: EncoderSettings, keepSeconds: Double) {
         queue.async {
-            if s != self.settings { self.closeAll() }
+            if s != self.settings {
+                self.closeAll()
+                self.stopIdleTimer()   // never repeat a frame of the old size into the new encoder
+            }
             self.settings = s
             self.keepSeconds = keepSeconds
+        }
+    }
+
+    /// The stream was stopped but its footage should be kept (restart with new settings).
+    func streamEnded() {
+        queue.async {
+            self.closeAll()
+            self.stopIdleTimer()
         }
     }
 
@@ -104,7 +116,7 @@ final class SegmentPipeline: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             }
             self.current = nil
             self.previous = nil
-            self.lastImage = nil
+            self.stopIdleTimer()
             for s in self.finished { try? FileManager.default.removeItem(at: s.url) }
             self.finished.removeAll()
         }
@@ -126,7 +138,7 @@ final class SegmentPipeline: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         let id = ObjectIdentifier(stream)
         queue.async {
             self.closeAll()
-            self.lastImage = nil
+            self.stopIdleTimer()
         }
         onStop?(id, error)
     }
@@ -136,26 +148,41 @@ final class SegmentPipeline: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     private func handleVideo(_ sb: CMSampleBuffer) {
         guard let attachments = CMSampleBufferGetSampleAttachmentsArray(sb, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
               let raw = attachments.first?[.status] as? Int,
-              let status = SCFrameStatus(rawValue: raw),
+              SCFrameStatus(rawValue: raw) == .complete,
               let settings else { return }
-        let pts = sb.presentationTimeStamp
-        switch status {
-        case .complete:
-            lastImage = sb.imageBuffer
-            lastFormat = sb.formatDescription
-            append(sb, at: pts, settings: settings)
-        case .idle:
-            // Nothing changed on screen: re-append the last frame at a low rate.
-            guard let image = lastImage, let format = lastFormat,
-                  let cur = current, CMTimeSubtract(pts, cur.last) >= idleRepeat else { return }
-            var timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: pts, decodeTimeStamp: .invalid)
-            var copy: CMSampleBuffer?
-            CMSampleBufferCreateReadyWithImageBuffer(allocator: nil, imageBuffer: image, formatDescription: format,
-                                                     sampleTiming: &timing, sampleBufferOut: &copy)
-            if let copy { append(copy, at: pts, settings: settings) }
-        default:
-            break
-        }
+        lastImage = sb.imageBuffer
+        lastFormat = sb.formatDescription
+        append(sb, at: sb.presentationTimeStamp, settings: settings)
+        startIdleTimer()
+    }
+
+    /// ScreenCaptureKit sends nothing new while the screen is static. A cheap timer re-appends the
+    /// last frame so segments keep rotating (and reopen after a flush) and audio keeps interleaving.
+    private func startIdleTimer() {
+        guard idleTimer == nil else { return }
+        let t = DispatchSource.makeTimerSource(queue: queue)
+        t.schedule(deadline: .now() + idleRepeat.seconds, repeating: idleRepeat.seconds, leeway: .milliseconds(100))
+        t.setEventHandler { [weak self] in self?.repeatLastFrame() }
+        t.resume()
+        idleTimer = t
+    }
+
+    private func stopIdleTimer() {
+        idleTimer?.cancel()
+        idleTimer = nil
+        lastImage = nil
+        lastFormat = nil
+    }
+
+    private func repeatLastFrame() {
+        guard let image = lastImage, let format = lastFormat, let settings else { return }
+        let now = Self.hostNow
+        if let cur = current, CMTimeSubtract(now, cur.last) < idleRepeat { return }
+        var timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: now, decodeTimeStamp: .invalid)
+        var copy: CMSampleBuffer?
+        CMSampleBufferCreateReadyWithImageBuffer(allocator: nil, imageBuffer: image, formatDescription: format,
+                                                 sampleTiming: &timing, sampleBufferOut: &copy)
+        if let copy { append(copy, at: now, settings: settings) }
     }
 
     private func append(_ sb: CMSampleBuffer, at pts: CMTime, settings: EncoderSettings) {

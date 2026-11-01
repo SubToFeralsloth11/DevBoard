@@ -85,6 +85,8 @@ final class AppModel {
     @ObservationIgnored weak var island: IslandController?
     @ObservationIgnored private var toastTask: Task<Void, Never>?
     @ObservationIgnored private var hovering = false
+    @ObservationIgnored private var hoverSince = Date.distantPast
+    @ObservationIgnored private var toastSince = Date.distantPast
 
     private init() {
         agents.onAgentFinished = { [weak self] agent in
@@ -99,19 +101,24 @@ final class AppModel {
     // MARK: Island
 
     func setIslandHover(_ hover: Bool) {
+        if hover && !hovering { hoverSince = .now }
         hovering = hover
         refreshIslandMode()
     }
 
+    /// The pointer arrived after the toast did, i.e. the user is reaching for the toast.
+    private var hoverIsOnToast: Bool { toast != nil && hovering && hoverSince > toastSince }
+
     /// Toasts stay up while the pointer rests on them so their action stays clickable.
     func showToast(_ toast: Toast, seconds: Double = 3.2) {
         self.toast = toast
+        toastSince = .now
         refreshIslandMode()
         toastTask?.cancel()
         toastTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(seconds))
             var held = false
-            while !Task.isCancelled, self?.hovering == true {
+            while !Task.isCancelled, self?.hoverIsOnToast == true {
                 held = true
                 try? await Task.sleep(for: .milliseconds(250))
             }
@@ -128,9 +135,12 @@ final class AppModel {
         refreshIslandMode()
     }
 
-    /// Toast beats hover; hover never expands the island while the board hangs below it.
+    /// If you were already using the expanded bar when a toast arrives (e.g. you just pressed Record),
+    /// the bar stays put and the toast waits; otherwise the toast wins so it can be clicked.
+    /// Hover never expands the island while the board hangs below it.
     private func refreshIslandMode() {
-        let next: IslandMode = toast != nil ? .toast : (hovering && !boardShown ? .expanded : .compact)
+        let wantsBar = hovering && !boardShown && !hoverIsOnToast
+        let next: IslandMode = wantsBar ? .expanded : (toast != nil ? .toast : .compact)
         guard next != islandMode else { return }
         island?.willChange(to: next)
         withAnimation(DB.spring) { islandMode = next }
