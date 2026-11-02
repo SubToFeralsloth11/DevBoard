@@ -38,6 +38,7 @@ final class SettingsStore {
     var agentWindowMinutes: Int { didSet { d.set(agentWindowMinutes, forKey: K.agentWindow) } }
     var displayID: UInt32 { didSet { d.set(Int(displayID), forKey: K.displayID) } }
     var daymapURL: String { didSet { d.set(daymapURL, forKey: K.daymapURL) } }
+    var rummagePath: String { didSet { d.set(rummagePath, forKey: K.rummagePath) } }
     var schoolReminders: Bool { didSet { d.set(schoolReminders, forKey: K.schoolReminders) } }
     var lessonReminders: Bool { didSet { d.set(lessonReminders, forKey: K.lessonReminders) } }
 
@@ -58,6 +59,7 @@ final class SettingsStore {
         static let hideSelf = "hideSelfInCaptures", copyScreenshots = "copyScreenshots"
         static let agentNotify = "agentNotifications", agentWindow = "agentWindowMinutes", displayID = "displayID"
         static let daymapURL = "daymapURL", schoolReminders = "schoolReminders", lessonReminders = "lessonReminders"
+        static let rummagePath = "rummagePath"
     }
 
     init() {
@@ -66,6 +68,7 @@ final class SettingsStore {
             K.systemAudio: true, K.microphone: false, K.showCursor: true, K.hideSelf: true,
             K.copyScreenshots: true, K.agentNotify: true, K.agentWindow: 30, K.displayID: 0,
             K.daymapURL: "https://thegapshs.eq.daymap.net", K.schoolReminders: true, K.lessonReminders: true,
+            K.rummagePath: "~/code/rummage",
         ])
         replayEnabled = d.bool(forKey: K.replayEnabled)
         replaySeconds = d.integer(forKey: K.replaySeconds)
@@ -80,6 +83,7 @@ final class SettingsStore {
         agentWindowMinutes = d.integer(forKey: K.agentWindow)
         displayID = UInt32(d.integer(forKey: K.displayID))
         daymapURL = d.string(forKey: K.daymapURL) ?? ""
+        rummagePath = d.string(forKey: K.rummagePath) ?? "~/code/rummage"
         schoolReminders = d.bool(forKey: K.schoolReminders)
         lessonReminders = d.bool(forKey: K.lessonReminders)
         launchAtLogin = SMAppService.mainApp.status == .enabled

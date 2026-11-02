@@ -70,7 +70,7 @@ final class AppModel {
     let library = ClipLibrary()
     let agents = AgentScanner()
     let shelf = Shelf()
-    let fileSearch = FileSearch()
+    let fileSearch: FileSearch
     let daymap: DayMapService
     @ObservationIgnored private(set) lazy var capture = CaptureEngine(model: self)
 
@@ -110,6 +110,7 @@ final class AppModel {
 
     private init() {
         daymap = DayMapService(settings: settings)
+        fileSearch = FileSearch(settings: settings)
         daymap.onToast = { [weak self] toast in
             NSSound(named: "Purr")?.play()
             self?.showToast(toast, seconds: 6)

@@ -66,6 +66,15 @@ struct SettingsView: View {
                         }
                         note("Syncs every 20 minutes through your own DayMap sign-in, inside DevBoard. Your password is never stored; only the DayMap session, in ~/Library/Application Support/DevBoard.")
                     }
+                    group("File search (Rummage)", "sparkle.magnifyingglass") {
+                        HStack {
+                            Text("Rummage folder")
+                            Spacer()
+                            TextField("~/code/rummage", text: $s.rummagePath)
+                                .textFieldStyle(.roundedBorder).frame(width: 250)
+                        }
+                        note("The Files tab searches through Rummage. If it isn't running, DevBoard starts it in the background (no browser tab), and it keeps running after DevBoard quits.")
+                    }
                     group("Agents", "sparkles.rectangle.stack") {
                         Toggle("Notify when an agent finishes", isOn: $s.agentNotifications)
                         Picker("Show agents active in the last", selection: $s.agentWindowMinutes) {

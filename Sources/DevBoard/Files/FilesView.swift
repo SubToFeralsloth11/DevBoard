@@ -62,8 +62,8 @@ struct FilesView: View {
         @Bindable var fs = model.fileSearch
         return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Search files by name", text: $fs.text)
+                Image(systemName: "sparkle.magnifyingglass").foregroundStyle(.secondary)
+                TextField("Ask Rummage: “that receipt from October”", text: $fs.text)
                     .textFieldStyle(.plain)
                     .font(.system(size: 15, weight: .medium, design: .rounded))
                     .focused($searchFocused)
@@ -74,20 +74,50 @@ struct FilesView: View {
                 if !fs.text.isEmpty {
                     BubbleButton(symbol: "xmark.circle.fill", help: "Clear", tint: .secondary, size: 24) { fs.text = "" }
                 }
+                BubbleButton(symbol: "arrow.up.forward.square", help: "Open in Rummage (previews, 3D viewer, folders)", tint: .secondary, size: 26) {
+                    fs.openInRummage()
+                }
             }
             .padding(.horizontal, 14)
             .frame(height: 44)
             .card(radius: 16, highlighted: searchFocused)
 
-            if fs.text.isEmpty {
+            if !fs.text.isEmpty, fs.state == .ready, !fs.chips.isEmpty || fs.keywordOnly || fs.total > fs.hits.count {
+                HStack(spacing: 6) {
+                    ForEach(fs.chips, id: \.self) { Chip(text: $0, symbol: "line.3.horizontal.decrease", tint: DB.accent) }
+                    if fs.keywordOnly { Chip(text: "Keywords only while Rummage loads its AI", tint: DB.amber) }
+                    Spacer()
+                    if fs.total > fs.hits.count {
+                        Button("All \(fs.total) in Rummage") { fs.openInRummage() }
+                            .buttonStyle(.link).font(.system(size: 11, weight: .medium, design: .rounded))
+                    }
+                }
+            }
+
+            if case .unavailable(let problem) = fs.state, !fs.text.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.magnifyingglass").font(.system(size: 26, weight: .semibold)).foregroundStyle(DB.amber)
+                    Text(problem).font(.system(size: 12.5, weight: .semibold, design: .rounded)).multilineTextAlignment(.center)
+                    Button("Try again") { fs.retry() }.controlSize(.small)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if fs.state == .starting {
+                VStack(spacing: 8) {
+                    ProgressView()
+                    Text("Starting Rummage…").font(.system(size: 12.5, weight: .semibold, design: .rounded))
+                    Text("It keeps running in the background, so the next search is instant.")
+                        .font(.system(size: 11, design: .rounded)).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if fs.text.isEmpty {
                 VStack(spacing: 6) {
-                    Text("Type part of a file name").font(.system(size: 12.5, weight: .semibold, design: .rounded))
-                    Text("Searches your home folder and Applications with Spotlight. ↑↓ to pick, ⏎ to open,\nHTML pages open right here in DevBoard. Drag any result out or onto the shelf.")
+                    Text("Search everything in plain English").font(.system(size: 12.5, weight: .semibold, design: .rounded))
+                    Text("Powered by Rummage: “the code where I did pathfinding”, “pdfs from last week”, “zombie survival folder”.\n↑↓ to pick, ⏎ to open. HTML pages open right here in DevBoard. Drag any result out or onto the shelf.")
                         .font(.system(size: 11, design: .rounded)).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if fs.hits.isEmpty && !fs.searching {
-                Text("Nothing called “\(fs.text)”").font(.system(size: 12.5, design: .rounded)).foregroundStyle(.secondary)
+                Text("Rummage found nothing for “\(fs.text)”").font(.system(size: 12.5, design: .rounded)).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollViewReader { proxy in
@@ -170,16 +200,20 @@ private struct HitRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(nsImage: FileKind.icon(hit.url)).resizable().frame(width: 26, height: 26)
+            HitIcon(model: model, hit: hit)
             VStack(alignment: .leading, spacing: 1) {
-                Text(hit.url.lastPathComponent).font(.system(size: 12.5, weight: .semibold, design: .rounded)).lineLimit(1)
+                HStack(spacing: 5) {
+                    Text(hit.url.lastPathComponent).font(.system(size: 12.5, weight: .semibold, design: .rounded)).lineLimit(1)
+                    if hit.match == "project" { Chip(text: "project", tint: DB.violet) }
+                }
                 Text(hit.url.deletingLastPathComponent().path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
                     .font(.system(size: 10.5, design: .rounded)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                if !hit.snippet.isEmpty {
+                    Text(hit.snippet).font(.system(size: 10.5, design: .rounded)).foregroundStyle(.tertiary).lineLimit(1)
+                }
             }
             Spacer(minLength: 6)
-            if let used = hit.used {
-                Text(Fmt.ago(used)).font(.system(size: 10.5, design: .rounded)).foregroundStyle(.tertiary)
-            }
+            Text(Fmt.ago(hit.modified)).font(.system(size: 10.5, design: .rounded)).foregroundStyle(.tertiary)
             if hover || selected {
                 if FileKind.webEntry(for: hit.url) != nil {
                     BubbleButton(symbol: "globe", help: "Open in DevBoard", tint: DB.accent, size: 24) { WebWindows.shared.openFile(hit.url) }
@@ -193,12 +227,37 @@ private struct HitRow: View {
             }
         }
         .padding(.horizontal, 10)
-        .frame(height: 42)
+        .padding(.vertical, 5)
+        .frame(minHeight: 42)
         .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(selected ? 0.13 : hover ? 0.07 : 0)))
         .contentShape(Rectangle())
         .onHover { hover = $0 }
         .onDrag { FileKind.dragProvider(hit.url) }
         .contextMenu { FileMenu(model: model, url: hit.url, onShelf: false) }
+    }
+}
+
+/// Rummage's thumbnail for images, video, PDFs and models; the Finder icon for everything else.
+private struct HitIcon: View {
+    let model: AppModel
+    let hit: FileHit
+    private static let thumbKinds: Set<String> = ["image", "video", "pdf", "model", "design"]
+
+    var body: some View {
+        let icon = Image(nsImage: FileKind.icon(hit.url)).resizable().frame(width: 28, height: 28)
+        if Self.thumbKinds.contains(hit.kind) {
+            AsyncImage(url: model.fileSearch.thumbnailURL(hit)) { phase in
+                if let img = phase.image {
+                    img.resizable().aspectRatio(contentMode: .fill).frame(width: 34, height: 34)
+                        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                } else {
+                    icon
+                }
+            }
+            .frame(width: 34, height: 34)
+        } else {
+            icon.frame(width: 34, height: 34)
+        }
     }
 }
 
