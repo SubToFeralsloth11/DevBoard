@@ -19,7 +19,8 @@ struct SchoolTask: Identifiable, Codable, Hashable {
     var kind: String
     var posted: Date?
     var due: Date             // midnight at the start of the due day
-    var status: String
+    var status: String        // receipt / results text, e.g. "Your work has been received"
+    var teacher: String?
     var submitted: Bool
     var graded: Bool
 }
@@ -80,7 +81,8 @@ final class DayMapService {
 
     func taskURL(_ t: SchoolTask) -> URL? { base?.appending(path: "daymap/student/assignment.aspx").appending(queryItems: [.init(name: "TaskID", value: t.id)]) }
     var timetableURL: URL? { base?.appending(path: "daymap/timetable/timetable.aspx") }
-    private var tasksURL: URL? { base?.appending(path: "daymap/student/assignments.aspx").appending(queryItems: [.init(name: "View", value: "0")]) }
+    /// "All for this year" (View=2). View=0 is every task you've ever had, including past year levels' classes.
+    private var tasksURL: URL? { base?.appending(path: "daymap/student/assignments.aspx").appending(queryItems: [.init(name: "View", value: "2")]) }
 
     private func isDayMapApp(_ url: URL?) -> Bool {
         guard let url, let host = base?.host() else { return false }
@@ -306,7 +308,7 @@ final class DayMapService {
         let t = fresh[0]
         onToast?(Toast(symbol: "tray.and.arrow.down.fill",
                        title: fresh.count == 1 ? "New task: \(t.name)" : "\(fresh.count) new DayMap tasks",
-                       subtitle: fresh.count == 1 ? "\(t.subject) · due \(Self.dueText(t.due, now: now))" : fresh.prefix(3).map(\.name).joined(separator: ", "),
+                       subtitle: fresh.count == 1 ? "\(t.subjectName) · due \(Self.dueText(t.due, now: now))" : fresh.prefix(3).map(\.name).joined(separator: ", "),
                        tint: DB.violet, action: fresh.count == 1 ? .openSchoolTask(t.id) : .openSchool))
     }
 
@@ -331,7 +333,7 @@ final class DayMapService {
             let first = due[0]
             let toast: Toast = due.count == 1
                 ? Toast(symbol: "checklist", title: "\(first.task.name) is due \(first.today ? "today" : "tomorrow")",
-                        subtitle: first.task.subject, tint: first.today ? DB.rec : DB.amber, action: .openSchoolTask(first.task.id))
+                        subtitle: first.task.subjectName, tint: first.today ? DB.rec : DB.amber, action: .openSchoolTask(first.task.id))
                 : Toast(symbol: "checklist", title: "\(due.count) tasks due \(due.allSatisfy(\.today) ? "today" : "soon")",
                         subtitle: due.prefix(3).map(\.task.name).joined(separator: ", "), tint: DB.amber, action: .openSchool)
             onToast?(toast)
@@ -344,8 +346,8 @@ final class DayMapService {
             let key = "lesson:\(l.id):\(Int(l.start.timeIntervalSince1970))"
             guard !fired.contains(key) else { continue }
             remember(key)
-            onToast?(Toast(symbol: "bell.fill", title: "\(l.title) in \(max(1, Int((lead / 60).rounded()))) min",
-                           subtitle: l.notice.isEmpty ? Self.time(l.start) + " – " + Self.time(l.end) : l.notice,
+            onToast?(Toast(symbol: "bell.fill", title: "\(l.subject) in \(max(1, Int((lead / 60).rounded()))) min",
+                           subtitle: l.notice.isEmpty ? [l.room.map { "Room \($0)" }, Self.time(l.start) + " – " + Self.time(l.end)].compactMap { $0 }.joined(separator: " · ") : l.notice,
                            tint: DB.accent, action: .openSchool))
             return
         }
@@ -365,10 +367,10 @@ final class DayMapService {
         let cal = Calendar.current
         let classes = lessons.filter { $0.kind == "Lesson" }
         if let current = classes.first(where: { $0.start <= now && now < $0.end }) {
-            return Headline(symbol: "book.fill", text: "\(current.title) · till \(Self.time(current.end))", tint: DB.accent)
+            return Headline(symbol: "book.fill", text: "\(current.subject) · till \(Self.time(current.end))", tint: DB.accent)
         }
         if let next = classes.first(where: { $0.start > now && $0.start.timeIntervalSince(now) < 90 * 60 }) {
-            return Headline(symbol: "clock.fill", text: "\(next.title) \(Self.time(next.start))", tint: DB.accent)
+            return Headline(symbol: "clock.fill", text: "\(next.subject) \(Self.time(next.start))\(next.room.map { " · \($0)" } ?? "")", tint: DB.accent)
         }
         let soon = tasks.filter { !$0.submitted }
             .filter { let d = cal.dateComponents([.day], from: cal.startOfDay(for: now), to: $0.due).day ?? 99; return d >= 0 && d <= 2 }
@@ -474,22 +476,25 @@ final class DayMapService {
                           posted: nil, due: Calendar.current.startOfDay(for: due), status: "", submitted: false, graded: false)
     }
 
-    /// One row of DayMap's task grid: [link] Class | Type | Task | Set | Due | status…
+    /// One row of DayMap's task grid: TaskID link | Class | Type | Task | Set | Due | Teacher | Graded | receipt
     static func parseTask(_ row: [String: Any]) -> SchoolTask? {
         guard let id = row["id"] as? String, let cells = row["cells"] as? [String] else { return nil }
         let dateIdx = cells.indices.filter { parseShortDate(cells[$0]) != nil }
         guard let first = dateIdx.first else { return nil }
         let dueIdx = dateIdx.count > 1 ? dateIdx[1] : first
+        // The link cell only shows the task ID; the task's name is the cell just before the "set" date.
         let link = (row["link"] as? String ?? "").trimmingCharacters(in: .whitespaces)
-        let name = !link.isEmpty ? link : (first > 0 ? cells[first - 1] : "Task")
-        let before = cells[..<first].filter { !$0.isEmpty && $0 != name }
+        let name = !link.isEmpty && link != id && Int(link) == nil ? link : (first > 0 ? cells[first - 1] : "Task")
+        let before = cells[..<first].filter { !$0.isEmpty && $0 != name && $0 != id }
         let after = cells[(dueIdx + 1)...].filter { !$0.isEmpty }
+        let receipt = after.filter { $0.lowercased().contains("work") || $0.lowercased().contains("result") }
         let text = (row["text"] as? String ?? "").lowercased()
         let graded = text.contains("results have been published")
         let submitted = graded || text.contains("work has been received") || (text.contains("submitted") && !text.contains("not submitted"))
         return SchoolTask(id: id, name: name, subject: before.first ?? "", kind: before.count > 1 ? before[1] : "",
                           posted: dateIdx.count > 1 ? parseShortDate(cells[first]) : nil,
-                          due: parseShortDate(cells[dueIdx])!, status: after.joined(separator: " · "),
+                          due: parseShortDate(cells[dueIdx])!, status: receipt.joined(separator: " · "),
+                          teacher: after.first.flatMap { receipt.contains($0) ? nil : $0 },
                           submitted: submitted, graded: graded)
     }
 
@@ -572,4 +577,42 @@ final class DayMapService {
       return false;
     })()
     """#
+}
+
+/// Readable names for DayMap class codes: "ENG08 E" → English, "HPE08 E F05C" → HPE in room F05C.
+enum SchoolNames {
+    private static let subjects: [String: String] = [
+        "ENG": "English", "MAT": "Maths", "SCI": "Science", "HPE": "HPE", "GER": "German", "JAP": "Japanese",
+        "FRE": "French", "CHI": "Chinese", "SPA": "Spanish", "HSS": "Humanities", "HUM": "Humanities",
+        "HIS": "History", "GEO": "Geography", "DRA": "Drama", "MUS": "Music", "ART": "Art", "VIS": "Visual Art",
+        "DAN": "Dance", "MED": "Media", "DIG": "Digital Tech", "DES": "Design", "FDT": "Food & Design Tech",
+        "APP": "Applied Tech", "ITD": "Industrial Tech", "BUS": "Business", "ECO": "Economics", "CIV": "Civics",
+    ]
+
+    /// "ENG08 E" → "English". Roll class ("8E") and unknown codes come back as written.
+    static func subject(_ classCode: String) -> String {
+        let letters = String(classCode.prefix { $0.isLetter }).uppercased()
+        if classCode.first?.isNumber == true { return "Roll class \(classCode.split(separator: " ").first ?? "")" }
+        return subjects[letters] ?? classCode
+    }
+
+    /// DayMap lesson titles are "<class code> <room>": "HPE08 E F05C", "FDT08 8 H03K", "8E E01C".
+    static func lesson(_ title: String) -> (classCode: String, subject: String, room: String?) {
+        var parts = title.split(separator: " ").map(String.init)
+        guard parts.count >= 2, let last = parts.last, last.contains(where: \.isNumber), last.contains(where: \.isLetter) else {
+            return (title, subject(title), nil)
+        }
+        parts.removeLast()
+        let code = parts.joined(separator: " ")
+        return (code, subject(code), last)
+    }
+}
+
+extension SchoolLesson {
+    var subject: String { SchoolNames.lesson(title).subject }
+    var room: String? { SchoolNames.lesson(title).room }
+}
+
+extension SchoolTask {
+    var subjectName: String { SchoolNames.subject(subject) }
 }
