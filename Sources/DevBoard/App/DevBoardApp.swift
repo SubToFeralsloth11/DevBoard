@@ -25,6 +25,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.agents.windowMinutes = model.settings.agentWindowMinutes
         model.agents.start()
         model.monitor.start()
+        model.daymap.start()
+        model.dragWatcher.start()
 
         let island = IslandController(model: model)
         let board = BoardController(model: model)
@@ -37,6 +39,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let m = model
         hk.register(kVK_ANSI_D) { m.perform(.toggleBoard) }
         hk.register(kVK_ANSI_A) { m.perform(.openAgents) }
+        hk.register(kVK_ANSI_L) { m.perform(.openSchool) }
+        hk.register(kVK_ANSI_F) { m.perform(.openFiles) }
         hk.register(kVK_ANSI_M) { m.perform(.openMonitor) }
         hk.register(kVK_ANSI_C) { m.perform(.openClips) }
         hk.register(kVK_ANSI_S) { m.perform(.screenshotRegion) }

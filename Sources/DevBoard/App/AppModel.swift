@@ -3,12 +3,14 @@ import Observation
 import SwiftUI
 
 enum BoardTab: String, CaseIterable, Identifiable {
-    case agents, monitor, clips, settings
+    case agents, school, files, monitor, clips, settings
 
     var id: String { rawValue }
     var title: String {
         switch self {
         case .agents: "Agents"
+        case .school: "School"
+        case .files: "Files"
         case .monitor: "Monitor"
         case .clips: "Clips"
         case .settings: "Settings"
@@ -17,6 +19,8 @@ enum BoardTab: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .agents: "sparkles.rectangle.stack"
+        case .school: "graduationcap"
+        case .files: "tray.full"
         case .monitor: "gauge.with.dots.needle.67percent"
         case .clips: "film.stack"
         case .settings: "slider.horizontal.3"
@@ -25,7 +29,8 @@ enum BoardTab: String, CaseIterable, Identifiable {
 }
 
 enum IslandMode: Equatable {
-    case compact, expanded, toast
+    /// `.drop` turns the island into a drop zone while you drag files anywhere on the Mac.
+    case compact, expanded, toast, drop
 }
 
 enum ToastAction: Equatable {
@@ -33,6 +38,8 @@ enum ToastAction: Equatable {
     case openAgent(String)
     case openPrivacySettings
     case openSettings
+    case openSchool
+    case openSchoolTask(String)
 }
 
 struct Toast: Identifiable, Equatable {
@@ -47,7 +54,7 @@ struct Toast: Identifiable, Equatable {
 
 /// Everything DevBoard can do from the island, hotkeys or the board.
 enum DevAction {
-    case toggleBoard, openAgents, openMonitor, openClips, openSettings
+    case toggleBoard, openAgents, openSchool, openFiles, openMonitor, openClips, openSettings
     case screenshotRegion, screenshotWindow, screenshotScreen
     case toggleRecording, saveReplay, toggleReplay
     case toggleIsland, quit
@@ -62,6 +69,9 @@ final class AppModel {
     let monitor = SystemMonitor()
     let library = ClipLibrary()
     let agents = AgentScanner()
+    let shelf = Shelf()
+    let fileSearch = FileSearch()
+    let daymap: DayMapService
     @ObservationIgnored private(set) lazy var capture = CaptureEngine(model: self)
 
     var boardTab: BoardTab = .agents {
@@ -80,6 +90,15 @@ final class AppModel {
     var toast: Toast?
     var editingClip: ClipItem?
     var focusedAgentID: String?
+    var focusedTaskID: String?
+    /// Bumped to move keyboard focus into the Files search field.
+    var focusSearchToken = 0
+    /// Height of the island's resting capsule, matched to the menu bar it sits in.
+    var barHeight: CGFloat = 24
+    /// Files are being dragged somewhere on screen (from another app).
+    var fileDragActive = false
+    /// A shelf item is being dragged out of the island; keep the shelf open until it lands.
+    var shelfDragging = false
 
     @ObservationIgnored weak var board: BoardController?
     @ObservationIgnored weak var island: IslandController?
@@ -87,8 +106,21 @@ final class AppModel {
     @ObservationIgnored private var hovering = false
     @ObservationIgnored private var hoverSince = Date.distantPast
     @ObservationIgnored private var toastSince = Date.distantPast
+    @ObservationIgnored let dragWatcher = FileDragWatcher()
 
     private init() {
+        daymap = DayMapService(settings: settings)
+        daymap.onToast = { [weak self] toast in
+            NSSound(named: "Purr")?.play()
+            self?.showToast(toast, seconds: 6)
+        }
+        shelf.onChange = { [weak self] in self?.island?.refit() }
+        dragWatcher.ignore = { [weak self] in self?.shelfDragging == true }
+        dragWatcher.onChange = { [weak self] active in
+            guard let self else { return }
+            self.fileDragActive = active
+            self.refreshIslandMode()
+        }
         agents.onAgentFinished = { [weak self] agent in
             guard let self, self.settings.agentNotifications else { return }
             NSSound(named: "Glass")?.play()
@@ -137,10 +169,12 @@ final class AppModel {
 
     /// If you were already using the expanded bar when a toast arrives (e.g. you just pressed Record),
     /// the bar stays put and the toast waits; otherwise the toast wins so it can be clicked.
-    /// Hover never expands the island while the board hangs below it.
-    private func refreshIslandMode() {
-        let wantsBar = hovering && !boardShown && !hoverIsOnToast
-        let next: IslandMode = wantsBar ? .expanded : (toast != nil ? .toast : .compact)
+    /// Hover never expands the island while the board hangs below it. Dragging files anywhere turns it
+    /// into a drop zone; dragging a shelf item out keeps the bar (and its shelf) open until it lands.
+    func refreshIslandMode() {
+        let wantsBar = (hovering || shelfDragging) && !boardShown && !hoverIsOnToast
+        let next: IslandMode = fileDragActive && !shelfDragging ? .drop
+            : wantsBar ? .expanded : (toast != nil ? .toast : .compact)
         guard next != islandMode else { return }
         island?.willChange(to: next)
         withAnimation(DB.spring) { islandMode = next }
@@ -161,6 +195,40 @@ final class AppModel {
             NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
         case .openSettings:
             openBoard(.settings)
+        case .openSchool:
+            openBoard(.school)
+        case .openSchoolTask(let id):
+            focusedTaskID = id
+            openBoard(.school)
+        }
+    }
+
+    // MARK: Files
+
+    /// HTML pages (and folders with an index.html) open in DevBoard; everything else in its usual app.
+    func openFile(_ url: URL) {
+        if FileKind.webEntry(for: url) != nil { WebWindows.shared.openFile(url) } else { NSWorkspace.shared.open(url) }
+    }
+
+    func dropOnShelf(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        withAnimation(DB.spring) { shelf.add(urls) }
+        NSSound(named: "Pop")?.play()
+        showToast(Toast(symbol: "tray.full.fill",
+                        title: urls.count == 1 ? urls[0].lastPathComponent : "\(urls.count) files on the shelf",
+                        subtitle: "Hover the island to drag \(urls.count == 1 ? "it" : "them") back out", tint: DB.mint), seconds: 2.2)
+    }
+
+    /// Keeps the island's shelf open while a shelf item is being dragged out.
+    func beginShelfDrag() {
+        guard !shelfDragging else { return }
+        shelfDragging = true
+        refreshIslandMode()
+        Task { [weak self] in
+            while NSEvent.pressedMouseButtons & 1 != 0 { try? await Task.sleep(for: .milliseconds(120)) }
+            guard let self else { return }
+            self.shelfDragging = false
+            self.refreshIslandMode()
         }
     }
 
@@ -189,6 +257,9 @@ final class AppModel {
         switch action {
         case .toggleBoard: toggleBoard()
         case .openAgents: toggleBoard(.agents)
+        case .openSchool: toggleBoard(.school)
+        case .openFiles:
+            if boardShown && boardTab == .files { board?.hide() } else { openBoard(.files); focusSearchToken += 1 }
         case .openMonitor: toggleBoard(.monitor)
         case .openClips: toggleBoard(.clips)
         case .openSettings: toggleBoard(.settings)

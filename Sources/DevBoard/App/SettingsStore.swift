@@ -37,6 +37,9 @@ final class SettingsStore {
     var agentNotifications: Bool { didSet { d.set(agentNotifications, forKey: K.agentNotify) } }
     var agentWindowMinutes: Int { didSet { d.set(agentWindowMinutes, forKey: K.agentWindow) } }
     var displayID: UInt32 { didSet { d.set(Int(displayID), forKey: K.displayID) } }
+    var daymapURL: String { didSet { d.set(daymapURL, forKey: K.daymapURL) } }
+    var schoolReminders: Bool { didSet { d.set(schoolReminders, forKey: K.schoolReminders) } }
+    var lessonReminders: Bool { didSet { d.set(lessonReminders, forKey: K.lessonReminders) } }
 
     var launchAtLogin: Bool {
         didSet {
@@ -54,6 +57,7 @@ final class SettingsStore {
         static let fps = "fps", systemAudio = "systemAudio", microphone = "microphone", showCursor = "showCursor"
         static let hideSelf = "hideSelfInCaptures", copyScreenshots = "copyScreenshots"
         static let agentNotify = "agentNotifications", agentWindow = "agentWindowMinutes", displayID = "displayID"
+        static let daymapURL = "daymapURL", schoolReminders = "schoolReminders", lessonReminders = "lessonReminders"
     }
 
     init() {
@@ -61,6 +65,7 @@ final class SettingsStore {
             K.replayEnabled: true, K.replaySeconds: 30, K.quality: ReplayQuality.p1080.rawValue, K.fps: 60,
             K.systemAudio: true, K.microphone: false, K.showCursor: true, K.hideSelf: true,
             K.copyScreenshots: true, K.agentNotify: true, K.agentWindow: 30, K.displayID: 0,
+            K.daymapURL: "https://thegapshs.eq.daymap.net", K.schoolReminders: true, K.lessonReminders: true,
         ])
         replayEnabled = d.bool(forKey: K.replayEnabled)
         replaySeconds = d.integer(forKey: K.replaySeconds)
@@ -74,6 +79,9 @@ final class SettingsStore {
         agentNotifications = d.bool(forKey: K.agentNotify)
         agentWindowMinutes = d.integer(forKey: K.agentWindow)
         displayID = UInt32(d.integer(forKey: K.displayID))
+        daymapURL = d.string(forKey: K.daymapURL) ?? ""
+        schoolReminders = d.bool(forKey: K.schoolReminders)
+        lessonReminders = d.bool(forKey: K.lessonReminders)
         launchAtLogin = SMAppService.mainApp.status == .enabled
     }
 

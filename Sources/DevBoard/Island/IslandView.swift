@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum IslandButton: String, CaseIterable, Identifiable {
-    case agents, monitor, clips, screenshot, record, replay, settings
+    case agents, school, files, monitor, clips, screenshot, record, replay, settings
     var id: String { rawValue }
 }
 
@@ -9,12 +9,14 @@ struct IslandView: View {
     let model: AppModel
     @Namespace private var ns
     @State private var hovered: IslandButton?
+    @State private var dropTargeted = false
 
     private var size: CGSize {
         switch model.islandMode {
-        case .compact: IslandMetrics.compact
+        case .compact: IslandMetrics.compact(barHeight: model.barHeight)
         case .expanded: IslandMetrics.expanded
         case .toast: IslandMetrics.toast
+        case .drop: IslandMetrics.drop
         }
     }
 
@@ -34,12 +36,23 @@ struct IslandView: View {
                             ToastContent(toast: toast) { if let a = toast.action { model.runToastAction(a) } else { model.dismissToast() } }
                                 .transition(.blurReplace.combined(with: .scale(0.9)))
                         }
+                    case .drop:
+                        DropContent(targeted: dropTargeted, count: model.shelf.items.count)
+                            .transition(.blurReplace.combined(with: .scale(0.9)))
                     }
                 }
                 .frame(width: size.width, height: size.height)
-                .glass(Capsule(), tint: .black.opacity(0.18), interactive: true)
+                .glass(RoundedRectangle(cornerRadius: model.islandMode == .drop ? 26 : size.height / 2, style: .continuous),
+                       tint: dropTargeted ? DB.mint.opacity(0.3) : .black.opacity(0.18), interactive: true)
                 .glassEffectID("island", in: ns)
                 .contextMenu { IslandMenu(model: model) }
+
+                if model.islandMode == .expanded, !model.shelf.isEmpty {
+                    ShelfStrip(model: model)
+                        .glass(Capsule(), tint: .black.opacity(0.18), interactive: true)
+                        .glassEffectID("shelf", in: ns)
+                        .transition(.blurReplace)
+                }
 
                 if model.islandMode == .expanded, let hovered {
                     Text(label(for: hovered))
@@ -54,8 +67,14 @@ struct IslandView: View {
             }
         }
         .animation(DB.snappy, value: hovered)
+        .animation(DB.snappy, value: dropTargeted)
         .padding(IslandMetrics.pad)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        // Files dropped anywhere on the island land on the shelf, whatever it is showing.
+        .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
+            Shelf.load(providers) { model.dropOnShelf($0) }
+            return true
+        }
         .onChange(of: model.islandMode) { _, mode in if mode != .expanded { hovered = nil } }
         .environment(\.colorScheme, .dark)
     }
@@ -64,6 +83,10 @@ struct IslandView: View {
         let s = model.settings
         switch b {
         case .agents: return "Agents  ⌥⇧A"
+        case .school:
+            if model.daymap.status == .signedOut { return "School  ⌥⇧L  ·  sign in to DayMap" }
+            return "School: classes & DayMap tasks  ⌥⇧L"
+        case .files: return "Shelf & file search  ⌥⇧F"
         case .monitor: return "Monitor  ⌥⇧M"
         case .clips: return "Clips & screenshots  ⌥⇧C"
         case .screenshot: return "Screenshot  ⌥⇧S  ·  right-click for more"
@@ -120,16 +143,32 @@ private struct CompactContent: View {
                     Image(systemName: "memories").foregroundStyle(DB.amber)
                     Text("\(model.settings.replaySeconds)s").foregroundStyle(.secondary)
                 }
+            } else if let h = model.daymap.headline {
+                HStack(spacing: 5) {
+                    Image(systemName: h.symbol).foregroundStyle(h.tint)
+                    Text(h.text).lineLimit(1).truncationMode(.tail)
+                }
+                .help("From DayMap")
             } else {
                 Text("DevBoard").foregroundStyle(.secondary)
             }
 
             Spacer(minLength: 0)
 
-            RamRing(fraction: model.monitor.sample.memFraction, pressure: model.monitor.sample.pressure)
-                .frame(minWidth: 34, alignment: .trailing)
+            HStack(spacing: 7) {
+                if !model.shelf.isEmpty {
+                    HStack(spacing: 2) {
+                        Image(systemName: "tray.full.fill").font(.system(size: 9.5, weight: .bold))
+                        Text("\(model.shelf.items.count)").contentTransition(.numericText())
+                    }
+                    .foregroundStyle(DB.mint)
+                    .help("Files on the shelf; hover to drag them out")
+                }
+                RamRing(fraction: model.monitor.sample.memFraction, pressure: model.monitor.sample.pressure)
+            }
+            .frame(minWidth: 34, alignment: .trailing)
         }
-        .font(.system(size: 11.5, weight: .semibold, design: .rounded))
+        .font(.system(size: 11, weight: .semibold, design: .rounded))
         .padding(.horizontal, 12)
         .contentShape(Capsule())
         .onTapGesture {
@@ -169,6 +208,8 @@ private struct ExpandedContent: View {
     var body: some View {
         HStack(spacing: 4) {
             button(.agents, "sparkles.rectangle.stack", badge: model.agents.workingCount) { model.perform(.openAgents) }
+            button(.school, "graduationcap", badge: dueSoon) { model.perform(.openSchool) }
+            button(.files, "tray.full", active: !model.shelf.isEmpty) { model.perform(.openFiles) }
             button(.monitor, "gauge.with.dots.needle.67percent") { model.perform(.openMonitor) }
             button(.clips, "film.stack") { model.perform(.openClips) }
             divider
@@ -190,6 +231,13 @@ private struct ExpandedContent: View {
             button(.settings, "slider.horizontal.3") { model.perform(.openSettings) }
         }
         .padding(.horizontal, 9)
+    }
+
+    /// Unsubmitted DayMap tasks due today or tomorrow.
+    private var dueSoon: Int {
+        let cal = Calendar.current
+        let limit = cal.date(byAdding: .day, value: 2, to: cal.startOfDay(for: model.daymap.now))!
+        return model.daymap.tasks.filter { !$0.submitted && $0.due < limit && $0.due >= cal.startOfDay(for: model.daymap.now) }.count
     }
 
     private var divider: some View {
@@ -302,14 +350,98 @@ private struct ToastContent: View {
     }
 }
 
+// MARK: Drop zone
+
+private struct DropContent: View {
+    var targeted: Bool
+    var count: Int
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: targeted ? "tray.and.arrow.down.fill" : "tray.and.arrow.down")
+                .font(.system(size: 20, weight: .bold))
+                .foregroundStyle(DB.mint.gradient)
+                .frame(width: 44, height: 44)
+                .background(Circle().fill(DB.mint.opacity(targeted ? 0.3 : 0.16)))
+                .symbolEffect(.bounce, value: targeted)
+                .scaleEffect(targeted ? 1.08 : 1)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(targeted ? "Let go to keep it here" : "Drop on DevBoard")
+                    .font(.system(size: 13.5, weight: .semibold, design: .rounded))
+                Text(count == 0 ? "Then switch apps and drag it back out" : "Joins \(count) on the shelf")
+                    .font(.system(size: 11, weight: .medium, design: .rounded)).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16)
+    }
+}
+
+// MARK: Shelf strip
+
+/// Shelf items under the expanded bar; drag one out to drop it into any app.
+private struct ShelfStrip: View {
+    let model: AppModel
+    private let maxShown = 7
+
+    var body: some View {
+        let items = model.shelf.items
+        HStack(spacing: 4) {
+            ForEach(items.suffix(maxShown), id: \.self) { url in
+                ShelfChip(model: model, url: url)
+            }
+            if items.count > maxShown {
+                Button { model.perform(.openFiles) } label: {
+                    Text("+\(items.count - maxShown)")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .frame(width: 42, height: 46)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(PressScale())
+                .help("Show the whole shelf")
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 62)
+    }
+}
+
+private struct ShelfChip: View {
+    let model: AppModel
+    let url: URL
+    @State private var hover = false
+
+    var body: some View {
+        VStack(spacing: 2) {
+            Image(nsImage: FileKind.icon(url)).resizable().frame(width: 32, height: 32)
+            Text(url.lastPathComponent).font(.system(size: 9, weight: .medium, design: .rounded))
+                .lineLimit(1).truncationMode(.middle).frame(width: 52)
+        }
+        .padding(.vertical, 4)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(hover ? 0.14 : 0)))
+        .contentShape(Rectangle())
+        .onHover { hover = $0 }
+        .onTapGesture(count: 2) { model.openFile(url) }
+        .onDrag {
+            model.beginShelfDrag()
+            return FileKind.dragProvider(url)
+        }
+        .help("\(url.lastPathComponent): drag out to use, double-click to open")
+        .contextMenu { FileMenu(model: model, url: url, onShelf: true) }
+    }
+}
+
 // MARK: Menu
 
 struct IslandMenu: View {
     let model: AppModel
     var body: some View {
         Button("Agents", systemImage: "sparkles.rectangle.stack") { model.perform(.openAgents) }
+        Button("School", systemImage: "graduationcap") { model.perform(.openSchool) }
+        Button("Files", systemImage: "tray.full") { model.perform(.openFiles) }
         Button("Monitor", systemImage: "gauge.with.dots.needle.67percent") { model.perform(.openMonitor) }
         Button("Clips", systemImage: "film.stack") { model.perform(.openClips) }
+        Button("Sync DayMap now", systemImage: "arrow.triangle.2.circlepath") { model.daymap.syncNow() }
         Divider()
         Button(model.settings.replayEnabled ? "Turn instant replay off" : "Turn instant replay on") { model.perform(.toggleReplay) }
         Button("Hide island (⌥⇧H to bring back)") { model.perform(.toggleIsland) }

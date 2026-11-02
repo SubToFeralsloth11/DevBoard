@@ -44,6 +44,28 @@ struct SettingsView: View {
                     }
                 }
                 VStack(spacing: 14) {
+                    group("School (DayMap)", "graduationcap") {
+                        HStack {
+                            Text("DayMap address")
+                            Spacer()
+                            TextField("https://yourschool.eq.daymap.net", text: $s.daymapURL)
+                                .textFieldStyle(.roundedBorder).frame(width: 250)
+                                .onSubmit { model.daymap.syncNow() }
+                        }
+                        Toggle("Remind me before tasks are due", isOn: $s.schoolReminders)
+                        Toggle("Remind me 5 min before each class", isOn: $s.lessonReminders)
+                            .disabled(!s.schoolReminders)
+                        HStack {
+                            if model.daymap.status == .signedOut {
+                                Button("Sign in to DayMap") { model.daymap.signIn() }
+                            } else {
+                                Button("Sync now") { model.daymap.syncNow() }
+                                Button("Sign out") { Task { await model.daymap.signOut() } }
+                            }
+                            Spacer()
+                        }
+                        note("Syncs every 20 minutes through your own DayMap sign-in, inside DevBoard. Your password is never stored; only the DayMap session, in ~/Library/Application Support/DevBoard.")
+                    }
                     group("Agents", "sparkles.rectangle.stack") {
                         Toggle("Notify when an agent finishes", isOn: $s.agentNotifications)
                         Picker("Show agents active in the last", selection: $s.agentWindowMinutes) {
@@ -68,6 +90,8 @@ struct SettingsView: View {
                     group("Shortcuts", "command") {
                         shortcut("⌥⇧D", "Open / close DevBoard")
                         shortcut("⌥⇧A", "Agents")
+                        shortcut("⌥⇧L", "School")
+                        shortcut("⌥⇧F", "Files: shelf & search")
                         shortcut("⌥⇧M", "Monitor")
                         shortcut("⌥⇧C", "Clips")
                         shortcut("⌥⇧S", "Screenshot (region)")

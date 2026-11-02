@@ -10,6 +10,8 @@ struct BoardView: View {
             ZStack {
                 switch model.boardTab {
                 case .agents: AgentsView(model: model).transition(.boardSwap)
+                case .school: SchoolView(model: model).transition(.boardSwap)
+                case .files: FilesView(model: model).transition(.boardSwap)
                 case .monitor: MonitorView(model: model).transition(.boardSwap)
                 case .clips: ClipsView(model: model).transition(.boardSwap)
                 case .settings: SettingsView(model: model).transition(.boardSwap)
