@@ -15,17 +15,21 @@ A small liquid-glass island that sits in the middle of your Mac's menu bar, leve
 | Tab | What it does |
 |---|---|
 | Agents | A live "screen" for every recent omp session: what it is thinking, which tool it is running, the last output, an activity graph, tokens and cost. Subagents are nested under their parent. Click a card for the full feed and shortcuts to open the project. |
-| School | Your classes for today (or the next school day) and every DayMap task, grouped into overdue, this week, later and handed in. Click a task to open it in DayMap inside DevBoard. |
-| Files | The shelf (drop zone, drag out, double-click to open) and a quick Spotlight file-name search over your home folder and Applications. ↑↓ and ⏎ work; results can be dragged out or onto the shelf. |
+| School | Your classes for today (or the next school day) and this year's DayMap tasks. Upcoming work comes first (due today, next 7 days, next 2 weeks, later), or switch to **By subject**. Overdue and handed-in tasks are folded at the bottom. Click a task to open it in DayMap inside DevBoard. |
+| Files | The shelf (drop zone, drag out, double-click to open) and plain-English search through [Rummage](../rummage) ("that receipt from October", "pdfs from last week"). Shows Rummage's filters, snippets and thumbnails. ↑↓ and ⏎ work; results can be dragged out or onto the shelf, and **Open in Rummage** shows the full results page. |
 | Monitor | CPU, memory, memory pressure, swap and network graphs. Memory use is grouped by app (Chrome helpers count as Chrome), processes paused by ram-guard are flagged, and you can quit an app in two clicks. |
 | Clips | Your screenshots and clips. The editor trims with the native QuickTime trimmer and has 11 filter presets, exposure/contrast/saturation/warmth sliders, mute, export, GIF export, copy, share and drag-out. |
-| Settings | DayMap address and reminders, replay length, quality, frame rate, display, audio, microphone, cursor, agent window, open at login. |
+| Settings | DayMap address and reminders, Rummage folder, replay length, quality, frame rate, display, audio, microphone, cursor, agent window, open at login. |
+
+## File search
+
+The Files tab asks Rummage's local server (`127.0.0.1:47615`) for results. If Rummage isn't running, DevBoard starts it from the folder in Settings (default `~/code/rummage`) with `uv run rummage serve --no-browser`, the same way `Rummage.command` does but without opening a browser tab. It keeps running after DevBoard quits, so later searches are instant. Rummage's folders, index and AI model are unchanged; manage them from Rummage's own page.
 
 ## DayMap
 
 DayMap has no public API and signs in through Microsoft, so DevBoard signs in the way your browser does. Click **Sign in to DayMap** (School tab or Settings). A DevBoard window opens your timetable; sign in once. After that, a hidden web view with the same session syncs every 20 minutes, on wake, and when you open the School tab:
 
-- **Tasks** come from `student/assignments.aspx` (every page of the task grid).
+- **Tasks** come from `student/assignments.aspx?View=2` ("All for this year", every page of the task grid). The "All" view would also list past year levels' classes.
 - **Classes and diary events** come from `DWS/Diary.ashx`, the feed DayMap's timetable page uses, for yesterday through the next three weeks.
 
 Reminders appear in the island once each: a new task when it is posted, a task the afternoon before (3:30 pm) and the morning (7:30 am) it is due, and each class 5 minutes before it starts. Both kinds can be turned off in Settings.
