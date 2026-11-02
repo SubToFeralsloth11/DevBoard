@@ -139,26 +139,31 @@ private struct LessonRow: View {
 }
 
 private enum TaskGrouping: String, CaseIterable {
-    case subject = "By subject"
     case due = "By due date"
+    case subject = "By subject"
 }
 
+/// Upcoming work first (today, next 7 days, next 2 weeks, later). Overdue and handed-in tasks
+/// are folded away at the bottom: there's usually nothing left to do about them.
 private struct TaskColumn: View {
     let model: AppModel
     @State private var showDone = false
-    @AppStorage("schoolTaskGrouping") private var grouping: TaskGrouping = .subject
+    @State private var showOverdue = false
+    @AppStorage("schoolTaskView") private var grouping: TaskGrouping = .due
 
     var body: some View {
         let dm = model.daymap
         let today = Calendar.current.startOfDay(for: dm.now)
         let open = dm.tasks.filter { !$0.submitted }
-        let overdue = open.filter { $0.due < today }
+        let upcoming = open.filter { $0.due >= today }
+        let overdue = open.filter { $0.due < today }.sorted { $0.due > $1.due }
+        let week = upcoming.filter { $0.due < today.addingTimeInterval(8 * 86400) }
         let done = dm.tasks.filter(\.submitted).sorted { $0.due > $1.due }
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 SectionHeader(title: "Tasks", symbol: "checklist")
-                if !overdue.isEmpty { Chip(text: "\(overdue.count) overdue", tint: DB.rec) }
-                Chip(text: "\(open.count) to do", tint: DB.amber)
+                Chip(text: "\(week.count) due in 7 days", tint: week.isEmpty ? .secondary : DB.amber)
+                Chip(text: "\(upcoming.count) coming up", tint: DB.accent)
                 Picker("", selection: $grouping) {
                     ForEach(TaskGrouping.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }
@@ -166,28 +171,21 @@ private struct TaskColumn: View {
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
+                    if upcoming.isEmpty && !dm.tasks.isEmpty {
+                        Text("Nothing due coming up.")
+                            .font(.system(size: 12, design: .rounded)).foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity).padding(.vertical, 20)
+                    }
                     switch grouping {
-                    case .subject: bySubject(open, today: today)
-                    case .due: byDue(open, today: today)
+                    case .subject: bySubject(upcoming, today: today)
+                    case .due: byDue(upcoming, today: today)
                     }
-                    if !done.isEmpty {
-                        Button {
-                            withAnimation(DB.spring) { showDone.toggle() }
-                        } label: {
-                            Label("\(done.count) handed in", systemImage: showDone ? "chevron.down" : "chevron.right")
-                                .font(.system(size: 11.5, weight: .semibold, design: .rounded)).foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                        if showDone { ForEach(done) { TaskRow(model: model, task: $0, tint: DB.mint, showSubject: true) } }
-                    }
+                    folded("\(overdue.count) overdue", tint: DB.rec, items: overdue, open: $showOverdue)
+                    folded("\(done.count) handed in", tint: DB.mint, items: done, open: $showDone)
                     if dm.tasks.isEmpty {
                         Text(dm.status == .syncing ? "Fetching your tasks…" : "No tasks found")
                             .font(.system(size: 12, design: .rounded)).foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity).padding(.top, 40)
-                    } else if open.isEmpty {
-                        Text("Nothing to do. Everything's handed in.")
-                            .font(.system(size: 12, design: .rounded)).foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity).padding(.vertical, 20)
                     }
                 }
             }
@@ -196,6 +194,24 @@ private struct TaskColumn: View {
         .padding(14)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .card(radius: 22)
+    }
+
+    @ViewBuilder
+    private func folded(_ title: String, tint: Color, items: [SchoolTask], open: Binding<Bool>) -> some View {
+        if !items.isEmpty {
+            Button {
+                withAnimation(DB.spring) { open.wrappedValue.toggle() }
+            } label: {
+                Label(title, systemImage: open.wrappedValue ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 11.5, weight: .semibold, design: .rounded)).foregroundStyle(.secondary)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 4)
+            if open.wrappedValue {
+                ForEach(items) { TaskRow(model: model, task: $0, tint: tint, showSubject: true).opacity(0.75) }
+            }
+        }
     }
 
     /// One block per class, the class with the most urgent task first.
@@ -219,15 +235,18 @@ private struct TaskColumn: View {
     }
 
     @ViewBuilder
-    private func byDue(_ open: [SchoolTask], today: Date) -> some View {
-        let week = today.addingTimeInterval(7 * 86400)
-        group("Overdue", open.filter { $0.due < today }.reversed(), tint: DB.rec)
-        group("Due this week", open.filter { $0.due >= today && $0.due < week }, tint: DB.amber)
-        group("Later", open.filter { $0.due >= week }, tint: DB.accent)
+    private func byDue(_ upcoming: [SchoolTask], today: Date) -> some View {
+        let tomorrow = today.addingTimeInterval(86400)
+        let week = today.addingTimeInterval(8 * 86400)
+        let fortnight = today.addingTimeInterval(15 * 86400)
+        group("Due today", upcoming.filter { $0.due < tomorrow }, tint: DB.rec)
+        group("Next 7 days", upcoming.filter { $0.due >= tomorrow && $0.due < week }, tint: DB.amber)
+        group("Next 2 weeks", upcoming.filter { $0.due >= week && $0.due < fortnight }, tint: DB.accent)
+        group("Later", upcoming.filter { $0.due >= fortnight }, tint: DB.violet)
     }
 
     private func urgency(_ t: SchoolTask, today: Date) -> Color {
-        t.due < today ? DB.rec : t.due < today.addingTimeInterval(7 * 86400) ? DB.amber : DB.accent
+        t.due < today.addingTimeInterval(86400) ? DB.rec : t.due < today.addingTimeInterval(8 * 86400) ? DB.amber : DB.accent
     }
 
     @ViewBuilder
