@@ -3,9 +3,10 @@ import SwiftUI
 
 /// Runs Exam Quest arcade games in Godot for the play time bought on the site.
 ///
-/// The site opens `devboard://play?dir=<folder under ~/Code>&secs=<seconds>&name=<title>`.
+/// The site opens `devboard://play?dir=<folder under ~/Code>&secs=<seconds>&name=<title>&sid=<id>`.
 /// When the time runs out, or the site sends `devboard://end`, the island warns
-/// "Save your game" and the game is closed 30 seconds later.
+/// "Save your game" and the game is closed 30 seconds later. `GameStatusServer` lets the
+/// site poll whether the session `sid` is still running so it can refund unused time.
 @MainActor
 final class GameSessions {
     nonisolated static let warningSeconds = 30
@@ -13,10 +14,22 @@ final class GameSessions {
     private weak var model: AppModel?
     private var process: Process?
     private var name = ""
+    /// Session id from the site for the current or last game.
+    private var sid: String?
+    private lazy var server = GameStatusServer { [weak self] in self?.status ?? [:] }
     private var expiryTask: Task<Void, Never>?
     private var closeTask: Task<Void, Never>?
 
     init(model: AppModel) { self.model = model }
+
+    /// Starts the `127.0.0.1:47620/game` status endpoint.
+    func startStatusServer() { server.start() }
+
+    private var status: [String: Any] {
+        ["sid": sid ?? NSNull(),
+         "running": process?.isRunning == true,
+         "name": name.isEmpty ? NSNull() : name]
+    }
 
     func handle(_ url: URL) {
         guard url.scheme == "devboard" else { return }
@@ -25,7 +38,7 @@ final class GameSessions {
         switch url.host {
         case "play":
             guard let dir = query["dir"], let secs = Int(query["secs"] ?? ""), secs > 0 else { return }
-            play(dir: dir, seconds: secs, name: query["name"] ?? dir)
+            play(dir: dir, seconds: secs, name: query["name"] ?? dir, sid: query["sid"].flatMap { $0.isEmpty ? nil : $0 })
         case "end":
             endSoon()
         default:
@@ -33,7 +46,7 @@ final class GameSessions {
         }
     }
 
-    private func play(dir: String, seconds: Int, name: String) {
+    private func play(dir: String, seconds: Int, name: String, sid: String?) {
         // Only projects inside ~/Code, so a web page can't run arbitrary folders.
         let root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Code").standardizedFileURL
         let project = root.appendingPathComponent(dir).standardizedFileURL
@@ -60,6 +73,7 @@ final class GameSessions {
         }
         process = p
         self.name = name
+        self.sid = sid
         toast("Playing \(name)", "\(Self.clock(seconds)) of play time", tint: DB.mint, symbol: "gamecontroller.fill")
 
         let warnAfter = max(0, seconds - Self.warningSeconds)

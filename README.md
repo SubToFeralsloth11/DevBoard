@@ -42,7 +42,16 @@ Double-click an `.html` file (or a folder with an `index.html`) on the shelf or 
 
 ## Exam Quest games
 
-Exam Quest's Arcade can open a game in Godot instead of the browser. It opens `devboard://play?dir=<folder under ~/Code>&secs=<play time>&name=<title>`; DevBoard runs `godot --path` on that project (only folders inside `~/Code` with a `project.godot`). 30 seconds before the play time ends the island shows **Save your game, closes in 30 seconds** (again at 10 seconds), then the game is closed. **End now** on the site sends `devboard://end`, which starts the same 30-second warning straight away.
+Exam Quest's Arcade can open a game in Godot instead of the browser. It opens `devboard://play?dir=<folder under ~/Code>&secs=<play time>&name=<title>&sid=<session id>`; DevBoard runs `godot --path` on that project (only folders inside `~/Code` with a `project.godot`). 30 seconds before the play time ends the island shows **Save your game, closes in 30 seconds** (again at 10 seconds), then the game is closed. **End now** on the site sends `devboard://end`, which starts the same 30-second warning straight away.
+
+So the site can refund unused play time, DevBoard serves a status endpoint on loopback only, started at launch:
+
+```
+GET http://127.0.0.1:47620/game
+{"name": "Cook", "running": true, "sid": "abc"}
+```
+
+`sid` and `name` are the current game's, or the last game's once it has closed (`null` before any game). `running` is true until the Godot process exits. Responses send `Access-Control-Allow-Origin: *` and `Access-Control-Allow-Private-Network: true` (OPTIONS preflight answers 204), plus `Cache-Control: no-store`. Any other path returns 404.
 
 ## Shortcuts
 

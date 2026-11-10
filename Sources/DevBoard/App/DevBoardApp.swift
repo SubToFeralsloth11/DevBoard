@@ -27,6 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.monitor.start()
         model.daymap.start()
         model.dragWatcher.start()
+        model.games.startStatusServer()
 
         let island = IslandController(model: model)
         let board = BoardController(model: model)
