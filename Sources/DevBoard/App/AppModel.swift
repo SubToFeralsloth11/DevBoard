@@ -73,6 +73,7 @@ final class AppModel {
     let fileSearch: FileSearch
     let daymap: DayMapService
     @ObservationIgnored private(set) lazy var capture = CaptureEngine(model: self)
+    @ObservationIgnored private(set) lazy var games = GameSessions(model: self)
 
     var boardTab: BoardTab = .agents {
         didSet { monitor.detailed = boardShown && boardTab == .monitor }

@@ -66,6 +66,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// `devboard://play` and `devboard://end` from Exam Quest's arcade.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        urls.forEach { model.games.handle($0) }
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         .terminateNow
     }
