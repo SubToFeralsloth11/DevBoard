@@ -40,6 +40,10 @@ The last sync is cached in `~/Library/Application Support/DevBoard/daymap.json`,
 
 Double-click an `.html` file (or a folder with an `index.html`) on the shelf or in search, or choose **Open in DevBoard**. It opens in a DevBoard browser window that can read the whole project: the nearest folder above the page with `.git`, `package.json`, `project.godot` or a Vite config, otherwise the page's own folder. Relative CSS, JS, images, `fetch()` of local files and ES modules all load. The page reloads when any file in the project changes (turn off **Live reload** to stop that), and right-click → **Inspect Element** opens Web Inspector.
 
+## Exam Quest games
+
+Exam Quest's Arcade can open a game in Godot instead of the browser. It opens `devboard://play?dir=<folder under ~/Code>&secs=<play time>&name=<title>`; DevBoard runs `godot --path` on that project (only folders inside `~/Code` with a `project.godot`). 30 seconds before the play time ends the island shows **Save your game, closes in 30 seconds** (again at 10 seconds), then the game is closed. **End now** on the site sends `devboard://end`, which starts the same 30-second warning straight away.
+
 ## Shortcuts
 
 | Keys | Action |
