@@ -28,6 +28,10 @@
     <true/>
     <key>NSMicrophoneUsageDescription</key>
     <string>DevBoard can include your microphone in screen recordings and replay clips.</string>
+    <key>NSLocationUsageDescription</key>
+    <string>DevBoard draws the route your Mac travels each day on the Activity map. Locations stay on this Mac.</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>DevBoard draws the route your Mac travels each day on the Activity map. Locations stay on this Mac.</string>
     <key>NSScreenCaptureUsageDescription</key>
     <string>DevBoard records your screen for clips, screenshots and the instant-replay buffer.</string>
     <key>CFBundleURLTypes</key>

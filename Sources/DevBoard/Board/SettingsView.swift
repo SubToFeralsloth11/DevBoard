@@ -42,73 +42,9 @@ struct SettingsView: View {
                                 .buttonStyle(.link)
                         }
                     }
+                    filterAndActivity
                 }
-                VStack(spacing: 14) {
-                    group("School (DayMap)", "graduationcap") {
-                        HStack {
-                            Text("DayMap address")
-                            Spacer()
-                            TextField("https://yourschool.eq.daymap.net", text: $s.daymapURL)
-                                .textFieldStyle(.roundedBorder).frame(width: 250)
-                                .onSubmit { model.daymap.syncNow() }
-                        }
-                        Toggle("Remind me before tasks are due", isOn: $s.schoolReminders)
-                        Toggle("Remind me 5 min before each class", isOn: $s.lessonReminders)
-                            .disabled(!s.schoolReminders)
-                        HStack {
-                            if model.daymap.status == .signedOut {
-                                Button("Sign in to DayMap") { model.daymap.signIn() }
-                            } else {
-                                Button("Sync now") { model.daymap.syncNow() }
-                                Button("Sign out") { Task { await model.daymap.signOut() } }
-                            }
-                            Spacer()
-                        }
-                        note("Syncs every 20 minutes through your own DayMap sign-in, inside DevBoard. Your password is never stored; only the DayMap session, in ~/Library/Application Support/DevBoard.")
-                    }
-                    group("File search (Rummage)", "sparkle.magnifyingglass") {
-                        HStack {
-                            Text("Rummage folder")
-                            Spacer()
-                            TextField("~/code/rummage", text: $s.rummagePath)
-                                .textFieldStyle(.roundedBorder).frame(width: 250)
-                        }
-                        note("The Files tab searches through Rummage. If it isn't running, DevBoard starts it in the background (no browser tab), and it keeps running after DevBoard quits.")
-                    }
-                    group("Agents", "sparkles.rectangle.stack") {
-                        Toggle("Notify when an agent finishes", isOn: $s.agentNotifications)
-                        Picker("Show agents active in the last", selection: $s.agentWindowMinutes) {
-                            ForEach([10, 30, 60, 180], id: \.self) { Text($0 < 60 ? "\($0) min" : "\($0 / 60) h").tag($0) }
-                        }
-                        note("Reads omp transcripts in ~/.omp/agent/sessions. Nothing leaves your Mac.")
-                    }
-                    group("General", "gearshape") {
-                        Toggle("Open at login", isOn: $s.launchAtLogin)
-                        HStack {
-                            Text("Memory used by DevBoard")
-                            Spacer()
-                            Text(Fmt.bytes(selfFootprint())).monospacedDigit().foregroundStyle(.secondary)
-                        }
-                        HStack {
-                            Button("Quit DevBoard", role: .destructive) { model.perform(.quit) }
-                            Spacer()
-                            Text("v\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev")")
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                    group("Shortcuts", "command") {
-                        shortcut("⌥⇧D", "Open / close DevBoard")
-                        shortcut("⌥⇧A", "Agents")
-                        shortcut("⌥⇧L", "School")
-                        shortcut("⌥⇧F", "Files: shelf & search")
-                        shortcut("⌥⇧M", "Monitor")
-                        shortcut("⌥⇧C", "Clips")
-                        shortcut("⌥⇧S", "Screenshot (region)")
-                        shortcut("⌥⇧R", "Start / stop recording")
-                        shortcut("⌥⇧X", "Save instant replay")
-                        shortcut("⌥⇧H", "Hide / show the island")
-                    }
-                }
+                rightColumn
             }
             .padding(.bottom, 8)
         }
@@ -123,6 +59,105 @@ struct SettingsView: View {
         .onChange(of: s.hideSelfInCaptures) { _, _ in Task { await model.capture.syncStream() } }
         .onChange(of: s.agentWindowMinutes) { _, v in model.agents.windowMinutes = v }
         .task { await loadDisplays() }
+    }
+
+    private var rightColumn: some View {
+        @Bindable var s = model.settings
+        return VStack(spacing: 14) {
+            group("School (DayMap)", "graduationcap") {
+                HStack {
+                    Text("DayMap address")
+                    Spacer()
+                    TextField("https://yourschool.eq.daymap.net", text: $s.daymapURL)
+                        .textFieldStyle(.roundedBorder).frame(width: 250)
+                        .onSubmit { model.daymap.syncNow() }
+                }
+                Toggle("Remind me before tasks are due", isOn: $s.schoolReminders)
+                Toggle("Remind me 5 min before each class", isOn: $s.lessonReminders)
+                    .disabled(!s.schoolReminders)
+                HStack {
+                    if model.daymap.status == .signedOut {
+                        Button("Sign in to DayMap") { model.daymap.signIn() }
+                    } else {
+                        Button("Sync now") { model.daymap.syncNow() }
+                        Button("Sign out") { Task { await model.daymap.signOut() } }
+                    }
+                    Spacer()
+                }
+                note("Syncs every 20 minutes through your own DayMap sign-in, inside DevBoard. Your password is never stored; only the DayMap session, in ~/Library/Application Support/DevBoard.")
+            }
+            group("File search (Rummage)", "sparkle.magnifyingglass") {
+                HStack {
+                    Text("Rummage folder")
+                    Spacer()
+                    TextField("~/code/rummage", text: $s.rummagePath)
+                        .textFieldStyle(.roundedBorder).frame(width: 250)
+                }
+                note("The Files tab searches through Rummage. If it isn't running, DevBoard starts it in the background (no browser tab), and it keeps running after DevBoard quits.")
+            }
+            group("Agents", "sparkles.rectangle.stack") {
+                Toggle("Notify when an agent finishes", isOn: $s.agentNotifications)
+                Picker("Show agents active in the last", selection: $s.agentWindowMinutes) {
+                    ForEach([10, 30, 60, 180], id: \.self) { Text($0 < 60 ? "\($0) min" : "\($0 / 60) h").tag($0) }
+                }
+                note("Reads omp transcripts in ~/.omp/agent/sessions. Nothing leaves your Mac.")
+            }
+            group("General", "gearshape") {
+                Toggle("Open at login", isOn: $s.launchAtLogin)
+                HStack {
+                    Text("Memory used by DevBoard")
+                    Spacer()
+                    Text(Fmt.bytes(selfFootprint())).monospacedDigit().foregroundStyle(.secondary)
+                }
+                HStack {
+                    Button("Quit DevBoard", role: .destructive) { model.perform(.quit) }
+                    Spacer()
+                    Text("v\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev")")
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            group("Shortcuts", "command") {
+                ForEach(Self.shortcuts, id: \.0) { shortcut($0.0, $0.1) }
+            }
+        }
+    }
+
+    private static let shortcuts = [
+        ("⌥⇧D", "Open / close DevBoard"), ("⌥⇧A", "Agents"), ("⌥⇧L", "School"), ("⌥⇧F", "Files: shelf & search"),
+        ("⌥⇧M", "Monitor"), ("⌥⇧C", "Clips"), ("⌥⇧T", "Activity: keys, screen time, route"), ("⌥⇧S", "Screenshot (region)"),
+        ("⌥⇧R", "Start / stop recording"), ("⌥⇧X", "Save instant replay"), ("⌥⇧W", "Screen filter: off / warm / cool"),
+        ("⌥⇧H", "Hide / show the island"),
+    ]
+
+    private var filterAndActivity: some View {
+        @Bindable var s = model.settings
+        return VStack(spacing: 14) {
+            group("Screen filter", "sun.horizon") {
+                Picker("Tint", selection: $s.screenTint) {
+                    ForEach(ScreenTint.allCases) { Label($0.title, systemImage: $0.symbol).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                HStack {
+                    Text("Strength")
+                    Slider(value: $s.screenTintStrength, in: 0.1...1)
+                        .disabled(s.screenTint == .off)
+                    Text("\(Int((s.screenTintStrength * 100).rounded()))%")
+                        .monospacedDigit().foregroundStyle(.secondary).frame(width: 36, alignment: .trailing)
+                }
+                note("Warm takes the blue out of the screen (easier on the eyes at night); cool makes it crisper and bluer. Applies to every display while DevBoard is running. ⌥⇧W switches Off → Warm → Cool.")
+            }
+            group("Activity", "chart.bar.xaxis") {
+                HStack {
+                    Text("Saved in")
+                    Spacer()
+                    Button("Application Support/DevBoard/activity") { NSWorkspace.shared.open(ActivityTracker.dir) }
+                        .buttonStyle(.link)
+                }
+                note("Counts key presses (which keys and how many, never what you type), clicks, screen time per app and your Mac's route on a map. One small file per day; nothing leaves your Mac.")
+            }
+        }
+        .onChange(of: s.screenTint) { _, _ in model.screenFilter.apply() }
+        .onChange(of: s.screenTintStrength) { _, _ in model.screenFilter.apply() }
     }
 
     private func group<C: View>(_ title: String, _ symbol: String, @ViewBuilder _ content: () -> C) -> some View {

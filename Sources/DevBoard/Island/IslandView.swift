@@ -441,9 +441,14 @@ struct IslandMenu: View {
         Button("Files", systemImage: "tray.full") { model.perform(.openFiles) }
         Button("Monitor", systemImage: "gauge.with.dots.needle.67percent") { model.perform(.openMonitor) }
         Button("Clips", systemImage: "film.stack") { model.perform(.openClips) }
+        Button("Activity", systemImage: "chart.bar.xaxis") { model.perform(.openActivity) }
         Button("Sync DayMap now", systemImage: "arrow.triangle.2.circlepath") { model.daymap.syncNow() }
         Divider()
         Button(model.settings.replayEnabled ? "Turn instant replay off" : "Turn instant replay on") { model.perform(.toggleReplay) }
+        Picker("Screen filter", selection: Binding(get: { model.settings.screenTint },
+                                                   set: { model.settings.screenTint = $0; model.screenFilter.apply() })) {
+            ForEach(ScreenTint.allCases) { Label($0.title, systemImage: $0.symbol).tag($0) }
+        }
         Button("Hide island (⌥⇧H to bring back)") { model.perform(.toggleIsland) }
         Button("Settings…") { model.perform(.openSettings) }
         Divider()

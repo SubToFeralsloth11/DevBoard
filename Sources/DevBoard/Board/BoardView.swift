@@ -14,6 +14,7 @@ struct BoardView: View {
                 case .files: FilesView(model: model).transition(.boardSwap)
                 case .monitor: MonitorView(model: model).transition(.boardSwap)
                 case .clips: ClipsView(model: model).transition(.boardSwap)
+                case .activity: ActivityView(model: model).transition(.boardSwap)
                 case .settings: SettingsView(model: model).transition(.boardSwap)
                 }
             }

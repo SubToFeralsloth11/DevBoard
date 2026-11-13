@@ -28,6 +28,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.daymap.start()
         model.dragWatcher.start()
         model.games.startStatusServer()
+        model.activity.start()
+        model.screenFilter.apply()
 
         let island = IslandController(model: model)
         let board = BoardController(model: model)
@@ -48,6 +50,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hk.register(kVK_ANSI_R) { m.perform(.toggleRecording) }
         hk.register(kVK_ANSI_X) { m.perform(.saveReplay) }
         hk.register(kVK_ANSI_H) { m.perform(.toggleIsland) }
+        hk.register(kVK_ANSI_T) { m.perform(.openActivity) }
+        hk.register(kVK_ANSI_W) { m.perform(.cycleScreenTint) }
         hotkeys = hk
 
         if model.settings.replayEnabled {
@@ -74,5 +78,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         .terminateNow
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        model.activity.save()
     }
 }

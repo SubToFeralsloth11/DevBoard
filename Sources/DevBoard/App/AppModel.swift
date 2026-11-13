@@ -3,7 +3,7 @@ import Observation
 import SwiftUI
 
 enum BoardTab: String, CaseIterable, Identifiable {
-    case agents, school, files, monitor, clips, settings
+    case agents, school, files, monitor, clips, activity, settings
 
     var id: String { rawValue }
     var title: String {
@@ -13,6 +13,7 @@ enum BoardTab: String, CaseIterable, Identifiable {
         case .files: "Files"
         case .monitor: "Monitor"
         case .clips: "Clips"
+        case .activity: "Activity"
         case .settings: "Settings"
         }
     }
@@ -23,6 +24,7 @@ enum BoardTab: String, CaseIterable, Identifiable {
         case .files: "tray.full"
         case .monitor: "gauge.with.dots.needle.67percent"
         case .clips: "film.stack"
+        case .activity: "chart.bar.xaxis"
         case .settings: "slider.horizontal.3"
         }
     }
@@ -54,10 +56,10 @@ struct Toast: Identifiable, Equatable {
 
 /// Everything DevBoard can do from the island, hotkeys or the board.
 enum DevAction {
-    case toggleBoard, openAgents, openSchool, openFiles, openMonitor, openClips, openSettings
+    case toggleBoard, openAgents, openSchool, openFiles, openMonitor, openClips, openActivity, openSettings
     case screenshotRegion, screenshotWindow, screenshotScreen
     case toggleRecording, saveReplay, toggleReplay
-    case toggleIsland, quit
+    case toggleIsland, cycleScreenTint, quit
 }
 
 /// Root state shared by the island, the board and the services.
@@ -72,6 +74,8 @@ final class AppModel {
     let shelf = Shelf()
     let fileSearch: FileSearch
     let daymap: DayMapService
+    let activity = ActivityTracker()
+    let screenFilter: ScreenFilter
     @ObservationIgnored private(set) lazy var capture = CaptureEngine(model: self)
     @ObservationIgnored private(set) lazy var games = GameSessions(model: self)
 
@@ -112,6 +116,7 @@ final class AppModel {
     private init() {
         daymap = DayMapService(settings: settings)
         fileSearch = FileSearch(settings: settings)
+        screenFilter = ScreenFilter(settings: settings)
         daymap.onToast = { [weak self] toast in
             NSSound(named: "Purr")?.play()
             self?.showToast(toast, seconds: 6)
@@ -264,6 +269,7 @@ final class AppModel {
             if boardShown && boardTab == .files { board?.hide() } else { openBoard(.files); focusSearchToken += 1 }
         case .openMonitor: toggleBoard(.monitor)
         case .openClips: toggleBoard(.clips)
+        case .openActivity: toggleBoard(.activity)
         case .openSettings: toggleBoard(.settings)
         case .screenshotRegion: closeBoard(); capture.screenshot(.region)
         case .screenshotWindow: closeBoard(); capture.screenshot(.window)
@@ -277,6 +283,12 @@ final class AppModel {
                             title: settings.replayEnabled ? "Instant replay on" : "Instant replay off",
                             subtitle: settings.replayEnabled ? "⌥⇧X saves the last \(settings.replaySeconds)s" : nil,
                             tint: settings.replayEnabled ? DB.amber : .secondary))
+        case .cycleScreenTint:
+            screenFilter.cycle()
+            let tint = settings.screenTint
+            showToast(Toast(symbol: tint.symbol, title: tint == .off ? "Screen filter off" : "\(tint.title) screen filter",
+                            subtitle: "⌥⇧W switches Off → Warm → Cool",
+                            tint: tint == .warm ? DB.amber : tint == .cool ? DB.accent : .secondary), seconds: 2)
         case .toggleIsland:
             islandHidden.toggle()
             island?.setHidden(islandHidden)

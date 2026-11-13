@@ -19,7 +19,19 @@ A small liquid-glass island that sits in the middle of your Mac's menu bar, leve
 | Files | The shelf (drop zone, drag out, double-click to open) and plain-English search through [Rummage](../rummage) ("that receipt from October", "pdfs from last week"). Shows Rummage's filters, snippets and thumbnails. ↑↓ and ⏎ work; results can be dragged out or onto the shelf, and **Open in Rummage** shows the full results page. |
 | Monitor | CPU, memory, memory pressure, swap and network graphs. Memory use is grouped by app (Chrome helpers count as Chrome), processes paused by ram-guard are flagged, and you can quit an app in two clicks. |
 | Clips | Your screenshots and clips. The editor trims with the native QuickTime trimmer and has 11 filter presets, exposure/contrast/saturation/warmth sliders, mute, export, GIF export, copy, share and drag-out. |
-| Settings | DayMap address and reminders, Rummage folder, replay length, quality, frame rate, display, audio, microphone, cursor, agent window, open at login. |
+| Activity | A report for each day (arrows step back through earlier days): screen time per app and by hour, how many keys and mouse buttons you pressed and which ones, your most-used ⌘/⌃ shortcuts, and a line on a map of where your Mac travelled. |
+| Settings | DayMap address and reminders, Rummage folder, screen filter (warm / cool and strength), replay length, quality, frame rate, display, audio, microphone, cursor, agent window, open at login. |
+
+## Activity
+
+- **Keys and buttons:** a listen-only event tap counts each physical key press (held keys auto-repeating count once), modifier keys, and left / right / middle clicks. It stores how many times each key was pressed, never what you typed or in what order. Counting keys needs **Input Monitoring** (System Settings → Privacy & Security); the Activity tab has a button for it and starts counting as soon as it's allowed. Clicks need no permission.
+- **Screen time:** every 2 seconds the frontmost app gets the elapsed time, unless the screen is locked or asleep or there has been no input for 5 minutes.
+- **Route:** with **Location** allowed, Core Location (Wi-Fi based on a Mac) adds a point whenever the Mac has moved at least 40 m (or more than the fix's accuracy), and the map joins them into a line. No points are recorded while the lid is closed.
+- Each day is saved to `~/Library/Application Support/DevBoard/activity/yyyy-MM-dd.json` every minute, on sleep and on quit. Nothing leaves your Mac.
+
+## Screen filter
+
+**Warm** takes blue (and some green) out of every display, like Night Shift; **Cool** takes out red for a bluer, crisper screen. Choose it in Settings (with a strength slider), from the island's right-click menu, or press ⌥⇧W to switch Off → Warm → Cool. It works by scaling each display's gamma ramp, is reapplied after displays change or wake, and macOS restores normal colours when DevBoard quits.
 
 ## File search
 
@@ -64,6 +76,8 @@ GET http://127.0.0.1:47620/game
 | ⌥⇧R | Start / stop recording |
 | ⌥⇧X | Save the last 30 s (instant replay) |
 | ⌥⇧H | Hide / show the island |
+| ⌥⇧T | Activity |
+| ⌥⇧W | Screen filter: Off → Warm → Cool |
 
 ## Memory use
 

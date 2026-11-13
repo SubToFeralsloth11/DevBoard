@@ -41,6 +41,8 @@ final class SettingsStore {
     var rummagePath: String { didSet { d.set(rummagePath, forKey: K.rummagePath) } }
     var schoolReminders: Bool { didSet { d.set(schoolReminders, forKey: K.schoolReminders) } }
     var lessonReminders: Bool { didSet { d.set(lessonReminders, forKey: K.lessonReminders) } }
+    var screenTint: ScreenTint { didSet { d.set(screenTint.rawValue, forKey: K.screenTint) } }
+    var screenTintStrength: Double { didSet { d.set(screenTintStrength, forKey: K.screenTintStrength) } }
 
     var launchAtLogin: Bool {
         didSet {
@@ -59,7 +61,7 @@ final class SettingsStore {
         static let hideSelf = "hideSelfInCaptures", copyScreenshots = "copyScreenshots"
         static let agentNotify = "agentNotifications", agentWindow = "agentWindowMinutes", displayID = "displayID"
         static let daymapURL = "daymapURL", schoolReminders = "schoolReminders", lessonReminders = "lessonReminders"
-        static let rummagePath = "rummagePath"
+        static let rummagePath = "rummagePath", screenTint = "screenTint", screenTintStrength = "screenTintStrength"
     }
 
     init() {
@@ -68,7 +70,7 @@ final class SettingsStore {
             K.systemAudio: true, K.microphone: false, K.showCursor: true, K.hideSelf: true,
             K.copyScreenshots: true, K.agentNotify: true, K.agentWindow: 30, K.displayID: 0,
             K.daymapURL: "https://thegapshs.eq.daymap.net", K.schoolReminders: true, K.lessonReminders: true,
-            K.rummagePath: "~/code/rummage",
+            K.rummagePath: "~/code/rummage", K.screenTint: ScreenTint.off.rawValue, K.screenTintStrength: 0.6,
         ])
         replayEnabled = d.bool(forKey: K.replayEnabled)
         replaySeconds = d.integer(forKey: K.replaySeconds)
@@ -86,6 +88,8 @@ final class SettingsStore {
         rummagePath = d.string(forKey: K.rummagePath) ?? "~/code/rummage"
         schoolReminders = d.bool(forKey: K.schoolReminders)
         lessonReminders = d.bool(forKey: K.lessonReminders)
+        screenTint = ScreenTint(rawValue: d.string(forKey: K.screenTint) ?? "") ?? .off
+        screenTintStrength = d.double(forKey: K.screenTintStrength)
         launchAtLogin = SMAppService.mainApp.status == .enabled
     }
 
